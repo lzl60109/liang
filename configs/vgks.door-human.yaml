@@ -1,0 +1,5 @@
+base_config: vgks.adroit.base.yaml
+dataset_path: data/d4rl/door-human-v1
+save_dir: runs/vgks/door-human-v1/seed_0
+wandb_name: door-human-seed0
+run_name: door-human-seed0

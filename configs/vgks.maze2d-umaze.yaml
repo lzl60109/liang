@@ -1,0 +1,5 @@
+base_config: vgks.maze2d.base.yaml
+dataset_path: data/d4rl/maze2d-umaze-v1
+save_dir: runs/vgks/maze2d-umaze-v1/seed_0
+wandb_name: maze2d-umaze-seed0
+run_name: maze2d-umaze-seed0

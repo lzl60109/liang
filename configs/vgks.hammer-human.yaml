@@ -1,0 +1,5 @@
+base_config: vgks.adroit.base.yaml
+dataset_path: data/d4rl/hammer-human-v1
+save_dir: runs/vgks/hammer-human-v1/seed_0
+wandb_name: hammer-human-seed0
+run_name: hammer-human-seed0

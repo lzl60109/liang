@@ -1,0 +1,5 @@
+base_config: vgks.kitchen.base.yaml
+dataset_path: data/d4rl/kitchen-mixed-v0
+save_dir: runs/vgks/kitchen-mixed-v0/seed_0
+wandb_name: kitchen-mixed-seed0
+run_name: kitchen-mixed-seed0

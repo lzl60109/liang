@@ -191,8 +191,14 @@ So after you edit that one file, you do not need to type the long command line e
 
 Internally, the project now uses:
 
-- one shared base config: `configs/vgks.base.yaml`
-- nine task presets:
+- one shared global base config: `configs/vgks.base.yaml`
+- five family base configs:
+  - `configs/vgks.mujoco.base.yaml`
+  - `configs/vgks.maze2d.base.yaml`
+  - `configs/vgks.antmaze.base.yaml`
+  - `configs/vgks.adroit.base.yaml`
+  - `configs/vgks.kitchen.base.yaml`
+- Mujoco presets:
   - `configs/vgks.halfcheetah-medium.yaml`
   - `configs/vgks.halfcheetah-medium-replay.yaml`
   - `configs/vgks.halfcheetah-medium-expert.yaml`
@@ -202,8 +208,29 @@ Internally, the project now uses:
   - `configs/vgks.walker2d-medium.yaml`
   - `configs/vgks.walker2d-medium-replay.yaml`
   - `configs/vgks.walker2d-medium-expert.yaml`
+- Maze2D presets:
+  - `configs/vgks.maze2d-umaze.yaml`
+  - `configs/vgks.maze2d-medium.yaml`
+  - `configs/vgks.maze2d-large.yaml`
+- AntMaze presets:
+  - `configs/vgks.antmaze-umaze-diverse.yaml`
+  - `configs/vgks.antmaze-umaze-play.yaml`
+  - `configs/vgks.antmaze-medium-diverse.yaml`
+  - `configs/vgks.antmaze-medium-play.yaml`
+  - `configs/vgks.antmaze-large-diverse.yaml`
+  - `configs/vgks.antmaze-large-play.yaml`
+- Adroit presets:
+  - `configs/vgks.pen-human.yaml`
+  - `configs/vgks.hammer-human.yaml`
+  - `configs/vgks.door-human.yaml`
+  - `configs/vgks.relocate-human.yaml`
+- Kitchen presets:
+  - `configs/vgks.kitchen-complete.yaml`
+  - `configs/vgks.kitchen-partial.yaml`
+  - `configs/vgks.kitchen-mixed.yaml`
+  - `configs/vgks.kitchen-undirected.yaml`
 
-So yes: Mujoco tasks mostly share one common YAML base, and only the dataset path, output path, and run naming differ across the nine presets.
+So yes: Mujoco tasks share one common family YAML base, while Maze2D, AntMaze, Adroit, and Kitchen each get their own more conservative family defaults. This keeps one clean workflow while giving harder domains safer anchors and weaker value guidance.
 
 All four scripts support:
 
@@ -233,6 +260,18 @@ They also support two ways to choose the environment:
 
 This second form is the easiest way to switch between the standard D4RL splits for your paper experiments.
 
+For the newly added non-locomotion domains, the easiest path is to point `configs/vgks.yaml` at a preset and then run:
+
+```bash
+python train_vgks.py
+```
+
+Examples:
+
+- `base_config: vgks.antmaze-large-play.yaml`
+- `base_config: vgks.pen-human.yaml`
+- `base_config: vgks.kitchen-mixed.yaml`
+
 ## Downloading D4RL Trajectories First
 
 You asked for a TGCVG-like workflow where trajectories are downloaded first and then reused locally.
@@ -257,6 +296,14 @@ data/d4rl/halfcheetah-medium-v2/
 ```
 
 `VGKS` can then read that directory directly through `--dataset-path`.
+
+For environments outside the Mujoco locomotion defaults, prefer the explicit environment name when downloading:
+
+```bash
+python -m vgks.download_d4rl_dataset --env-name antmaze-large-play-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name pen-human-v1 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name kitchen-mixed-v0 --output-dir data/d4rl
+```
 
 ### 3. Use the CLI parser
 

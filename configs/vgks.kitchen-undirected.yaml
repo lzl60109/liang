@@ -1,0 +1,5 @@
+base_config: vgks.kitchen.base.yaml
+dataset_path: data/d4rl/kitchen-undirected-v0
+save_dir: runs/vgks/kitchen-undirected-v0/seed_0
+wandb_name: kitchen-undirected-seed0
+run_name: kitchen-undirected-seed0

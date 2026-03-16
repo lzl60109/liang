@@ -1,0 +1,9 @@
+base_config: vgks.base.yaml
+epochs: 40
+hidden_dim: 512
+sigma_lr: 0.0005
+lambda_q: 0.05
+lambda_state_anchor: 2.0
+lambda_latent_anchor: 0.3
+eval_episodes: 20
+sigma_warmup_steps: 1000

@@ -1,4 +1,4 @@
-base_config: vgks.base.yaml
+base_config: vgks.mujoco.base.yaml
 dataset_path: data/d4rl/hopper-medium-expert-v2
 save_dir: runs/vgks/hopper-medium-expert-v2/seed_0
 wandb_name: hopper-medium-expert-seed0

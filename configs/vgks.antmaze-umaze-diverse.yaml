@@ -1,0 +1,5 @@
+base_config: vgks.antmaze.base.yaml
+dataset_path: data/d4rl/antmaze-umaze-diverse-v2
+save_dir: runs/vgks/antmaze-umaze-diverse-v2/seed_0
+wandb_name: antmaze-umaze-diverse-seed0
+run_name: antmaze-umaze-diverse-seed0
