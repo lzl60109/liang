@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, Optional
+
+import numpy as np
+
+from vgks.models import ConservativeCritic, InverseDynamicsModel, KoopmanDynamicsModel, SigmaModel
+
+
+@dataclass
+class SigmaLossMetrics:
+    total_loss: float
+    commutation_loss: float
+    value_loss: float
+    state_anchor_loss: float
+    latent_anchor_loss: float
+    mean_conservative_q: float
+
+    def to_dict(self) -> Dict[str, float]:
+        return {
+            "total_loss": self.total_loss,
+            "commutation_loss": self.commutation_loss,
+            "value_loss": self.value_loss,
+            "state_anchor_loss": self.state_anchor_loss,
+            "latent_anchor_loss": self.latent_anchor_loss,
+            "mean_conservative_q": self.mean_conservative_q,
+        }
+
+
+class ValueGuidedKoopmanTrainer:
+    def __init__(
+        self,
+        dynamics: KoopmanDynamicsModel,
+        sigma_model: SigmaModel,
+        critic: ConservativeCritic,
+        action_dim: int,
+        inverse_model: Optional[InverseDynamicsModel] = None,
+        sigma_tau: float = 1.0,
+        lambda_q: float = 0.1,
+        lambda_state_anchor: float = 1.0,
+        lambda_latent_anchor: float = 0.1,
+        q_clip_min: float = -20.0,
+        q_clip_max: float = 20.0,
+        sigma_warmup_steps: int = 0,
+    ) -> None:
+        self.dynamics = dynamics
+        self.sigma_model = sigma_model
+        self.critic = critic
+        self.inverse_model = inverse_model or InverseDynamicsModel(
+            latent_dim=dynamics.latent_dim,
+            action_dim=action_dim,
+            hidden_dim=max(8, dynamics.latent_dim * 2),
+        )
+        self.sigma_tau = sigma_tau
+        self.lambda_q = lambda_q
+        self.lambda_state_anchor = lambda_state_anchor
+        self.lambda_latent_anchor = lambda_latent_anchor
+        self.q_clip_min = q_clip_min
+        self.q_clip_max = q_clip_max
+        self.sigma_warmup_steps = sigma_warmup_steps
+        self._steps = 0
+
+    def _as_float32(self, values: np.ndarray) -> np.ndarray:
+        return np.asarray(values, dtype=np.float32)
+
+    def compute_sigma_loss(self, batch: Dict[str, np.ndarray]) -> Dict[str, float]:
+        observations = self._as_float32(batch["observations"])
+        next_observations = self._as_float32(batch["next_observations"])
+
+        z_t = self.dynamics.encode(observations)
+        z_t1 = self.dynamics.encode(next_observations)
+        k_z_t = self.dynamics.predict_next_latent(z_t)
+        error = z_t1 - k_z_t
+        weights = np.exp(self.sigma_tau * np.sum(error**2, axis=1, keepdims=True))
+
+        sigma_z_t = self.sigma_model(z_t)
+        sigma_z_t1 = self.sigma_model(z_t1)
+
+        k_sigma_z_t = self.dynamics.predict_next_latent(sigma_z_t)
+        sigma_loss_vec = k_sigma_z_t - sigma_z_t1
+        commutation_loss = float(np.mean((weights * sigma_loss_vec) ** 2))
+
+        augmented_states = self.dynamics.decode(sigma_z_t)
+        augmented_next_states = self.dynamics.decode(sigma_z_t1)
+        augmented_actions = self.inverse_model(sigma_z_t, sigma_z_t1)
+
+        conservative_q = self.critic.conservative_value(augmented_states, augmented_actions)
+        conservative_q = np.clip(conservative_q, self.q_clip_min, self.q_clip_max)
+        effective_lambda_q = 0.0 if self._steps < self.sigma_warmup_steps else self.lambda_q
+        value_loss = float(-np.mean(conservative_q))
+
+        state_anchor_loss = float(
+            np.mean((augmented_states - observations) ** 2)
+            + np.mean((augmented_next_states - next_observations) ** 2)
+        )
+        latent_anchor_loss = float(
+            np.mean((sigma_z_t - z_t) ** 2) + np.mean((sigma_z_t1 - z_t1) ** 2)
+        )
+
+        total_loss = float(
+            commutation_loss
+            + effective_lambda_q * value_loss
+            + self.lambda_state_anchor * state_anchor_loss
+            + self.lambda_latent_anchor * latent_anchor_loss
+        )
+        self._steps += 1
+
+        return SigmaLossMetrics(
+            total_loss=total_loss,
+            commutation_loss=commutation_loss,
+            value_loss=value_loss,
+            state_anchor_loss=state_anchor_loss,
+            latent_anchor_loss=latent_anchor_loss,
+            mean_conservative_q=float(np.mean(conservative_q)),
+        ).to_dict()
+
+    def augment_batch(
+        self, batch: Dict[str, np.ndarray], q_threshold: Optional[float] = None
+    ) -> Dict[str, np.ndarray]:
+        observations = self._as_float32(batch["observations"])
+        next_observations = self._as_float32(batch["next_observations"])
+
+        z_t = self.dynamics.encode(observations)
+        z_t1 = self.dynamics.encode(next_observations)
+        sigma_z_t = self.sigma_model(z_t)
+        sigma_z_t1 = self.sigma_model(z_t1)
+
+        augmented_states = self.dynamics.decode(sigma_z_t)
+        augmented_next_states = self.dynamics.decode(sigma_z_t1)
+        augmented_actions = self.inverse_model(sigma_z_t, sigma_z_t1)
+        q_values = np.clip(
+            self.critic.conservative_value(augmented_states, augmented_actions),
+            self.q_clip_min,
+            self.q_clip_max,
+        )
+
+        if q_threshold is None:
+            mask = np.ones(q_values.shape[0], dtype=bool)
+        else:
+            mask = q_values >= q_threshold
+
+        return {
+            "observations": augmented_states[mask],
+            "actions": augmented_actions[mask],
+            "next_observations": augmented_next_states[mask],
+            "q_values": q_values[mask],
+        }

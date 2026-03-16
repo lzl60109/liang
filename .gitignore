@@ -1,0 +1,7 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+
+_extract_kats/
+_extract_tgcvg/
+*.zip
