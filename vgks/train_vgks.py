@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import torch
+import yaml
 
 from vgks.cli import build_parser
 from vgks.data import OfflineReplayDataset, build_dataloader, load_d4rl_dataset, load_offline_dataset
@@ -17,6 +18,25 @@ from vgks.logging import ExperimentLogger
 from vgks.models import ConservativeCritic, KoopmanDynamicsModel, SigmaModel
 from vgks.train_bc import BCPolicy, ToyEvalEnv, train_bc_epoch
 from vgks.trainer import ValueGuidedKoopmanTrainer
+
+
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "vgks.yaml"
+
+
+def load_config_file(config_path: Path) -> Dict[str, object]:
+    with Path(config_path).open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):
+        raise ValueError("VGKS config must be a YAML mapping")
+    return data
+
+
+def merge_config_with_args(config: Dict[str, object], arg_values: Dict[str, object]) -> Dict[str, object]:
+    merged = dict(config)
+    for key, value in arg_values.items():
+        if value is not None:
+            merged[key] = value
+    return merged
 
 
 def build_trainer_from_args(
@@ -271,6 +291,7 @@ def run_training(
 
 def main() -> None:
     parser = build_parser()
+    parser.add_argument("--config", dest="config", type=str, default=None)
     parser.add_argument("--dataset-path", dest="dataset_path", type=str, default=None)
     parser.add_argument("--env-name", dest="env_name", type=str, default=None)
     parser.add_argument("--task", dest="task", type=str, default=None)
@@ -292,11 +313,49 @@ def main() -> None:
     parser.add_argument("--eval-interval", dest="eval_interval", type=int, default=1)
     parser.add_argument("--save-best", dest="save_best", action="store_true")
     parser.add_argument("--run-name", dest="run_name", type=str, default=None)
+    parser.set_defaults(
+        dataset_path=None,
+        env_name=None,
+        task=None,
+        dataset_name=None,
+        state_dim=None,
+        action_dim=None,
+        latent_dim=None,
+        hidden_dim=None,
+        batch_size=None,
+        epochs=None,
+        sigma_lr=None,
+        save_dir=None,
+        seed=None,
+        use_wandb=None,
+        wandb_project=None,
+        wandb_group=None,
+        wandb_name=None,
+        eval_episodes=None,
+        eval_interval=None,
+        save_best=None,
+        run_name=None,
+        device=None,
+        num_workers=None,
+        lambda_q=None,
+        lambda_state_anchor=None,
+        lambda_latent_anchor=None,
+        q_clip_min=None,
+        q_clip_max=None,
+        q_threshold=None,
+        sigma_warmup_steps=None,
+        kats_checkpoint=None,
+        critic_checkpoint=None,
+    )
     args = parser.parse_args()
 
-    resolved_env_name = resolve_env_name(args.env_name, args.task, args.dataset_name)
-    state_dim = args.state_dim
-    action_dim = args.action_dim
+    config_path = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
+    config = load_config_file(config_path) if config_path.exists() else {}
+    merged = merge_config_with_args(config, vars(args))
+
+    resolved_env_name = resolve_env_name(merged.get("env_name"), merged.get("task"), merged.get("dataset_name"))
+    state_dim = merged.get("state_dim")
+    action_dim = merged.get("action_dim")
     if resolved_env_name is not None and (state_dim is None or action_dim is None):
         dims = infer_env_dims(make_env(resolved_env_name))
         state_dim = dims["state_dim"]
@@ -307,40 +366,40 @@ def main() -> None:
     trainer = build_trainer_from_args(
         state_dim=state_dim,
         action_dim=action_dim,
-        latent_dim=args.latent_dim,
-        hidden_dim=args.hidden_dim,
-        lambda_q=args.lambda_q,
-        lambda_state_anchor=args.lambda_state_anchor,
-        lambda_latent_anchor=args.lambda_latent_anchor,
-        q_clip_min=args.q_clip_min,
-        q_clip_max=args.q_clip_max,
-        sigma_warmup_steps=args.sigma_warmup_steps,
-        sigma_lr=args.sigma_lr,
-        kats_checkpoint=args.kats_checkpoint,
-        critic_checkpoint=args.critic_checkpoint,
-        device=args.device,
+        latent_dim=merged["latent_dim"],
+        hidden_dim=merged["hidden_dim"],
+        lambda_q=merged["lambda_q"],
+        lambda_state_anchor=merged["lambda_state_anchor"],
+        lambda_latent_anchor=merged["lambda_latent_anchor"],
+        q_clip_min=merged["q_clip_min"],
+        q_clip_max=merged["q_clip_max"],
+        sigma_warmup_steps=merged["sigma_warmup_steps"],
+        sigma_lr=merged["sigma_lr"],
+        kats_checkpoint=merged.get("kats_checkpoint"),
+        critic_checkpoint=merged.get("critic_checkpoint"),
+        device=merged["device"],
     )
     metrics = run_training(
         trainer=trainer,
-        dataset_path=Path(args.dataset_path) if args.dataset_path else None,
+        dataset_path=Path(merged["dataset_path"]) if merged.get("dataset_path") else None,
         env_name=resolved_env_name,
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-        num_workers=args.num_workers,
-        save_dir=Path(args.save_dir) if args.save_dir else None,
+        batch_size=merged["batch_size"],
+        epochs=merged["epochs"],
+        num_workers=merged["num_workers"],
+        save_dir=Path(merged["save_dir"]) if merged.get("save_dir") else None,
         state_dim=state_dim,
         action_dim=action_dim,
-        hidden_dim=args.hidden_dim,
-        seed=args.seed,
-        device=args.device,
-        use_wandb=args.use_wandb,
-        wandb_project=args.wandb_project,
-        wandb_group=args.wandb_group,
-        wandb_name=args.wandb_name,
-        eval_episodes=args.eval_episodes,
-        eval_interval=args.eval_interval,
-        save_best=args.save_best,
-        run_name=args.run_name,
+        hidden_dim=merged["hidden_dim"],
+        seed=merged["seed"],
+        device=merged["device"],
+        use_wandb=bool(merged["use_wandb"]),
+        wandb_project=merged["wandb_project"],
+        wandb_group=merged["wandb_group"],
+        wandb_name=merged["wandb_name"],
+        eval_episodes=merged["eval_episodes"],
+        eval_interval=merged["eval_interval"],
+        save_best=bool(merged["save_best"]),
+        run_name=merged.get("run_name"),
     )
     print(json.dumps(metrics["last"], indent=2))
 

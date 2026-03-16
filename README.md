@@ -175,6 +175,20 @@ The repository now exposes four standalone training entrypoints:
 - `python -m vgks.train_tgcvg`
 - `python -m vgks.train_vgks`
 
+For `VGKS`, there is also a root-level shortcut:
+
+```bash
+python train_vgks.py
+```
+
+By default it reads:
+
+```text
+configs/vgks.yaml
+```
+
+So after you edit that one file, you do not need to type the long command line each time.
+
 All four scripts support:
 
 - `--save-dir`
@@ -368,28 +382,45 @@ Step 1. Download and cache the D4RL trajectories:
 python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium --output-dir data/d4rl
 ```
 
-Step 2. Train VGKS from the cached trajectory directory:
+Step 2. Edit the default config file:
 
-```bash
-python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-seed0 --eval-interval 1 --save-best --run-name walker2d-medium-seed0
+```text
+configs/vgks.yaml
 ```
 
-Step 3. Repeat for the other splits:
+At minimum, update:
+
+- `dataset_path`
+- `save_dir`
+- `wandb_name`
+- `run_name`
+- optionally `device`
+
+Step 3. Train VGKS directly:
+
+```bash
+python train_vgks.py
+```
+
+Step 4. Repeat for the other splits:
 
 ```bash
 python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium-replay --output-dir data/d4rl
 python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium-expert --output-dir data/d4rl
 ```
 
-and then:
+Then update `configs/vgks.yaml` to point at:
+
+- `data/d4rl/walker2d-medium-replay-v2`
+- `data/d4rl/walker2d-medium-expert-v2`
+
+and run again:
 
 ```bash
-python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-replay-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-replay-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-replay-seed0 --eval-interval 1 --save-best --run-name walker2d-medium-replay-seed0
-
-python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-expert-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-expert-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-expert-seed0 --eval-interval 1 --save-best --run-name walker2d-medium-expert-seed0
+python train_vgks.py
 ```
 
-You can replace `walker2d` with `halfcheetah` or `hopper` in exactly the same pattern.
+You can replace `walker2d` with `halfcheetah` or `hopper` in exactly the same pattern by changing the cache path in `configs/vgks.yaml`.
 
 After training, if `--save-dir` is set, the script writes:
 
