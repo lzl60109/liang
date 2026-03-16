@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from pathlib import Path
 from typing import Dict, Union
 
@@ -37,6 +38,17 @@ def load_offline_dataset(source: Union[PathLike, ArrayDict]) -> ArrayDict:
         return {key: np.asarray(value, dtype=np.float32) for key, value in source.items()}
 
     source = Path(source)
+    if source.is_dir():
+        pkl_path = source / "dataset.pkl"
+        if pkl_path.exists():
+            with pkl_path.open("rb") as handle:
+                loaded = pickle.load(handle)
+            return {
+                key: None if value is None else np.asarray(value, dtype=np.float32)
+                for key, value in loaded.items()
+            }
+        raise ValueError(f"Dataset directory '{source}' does not contain dataset.pkl")
+
     if source.suffix == ".npz":
         with np.load(source) as data:
             return {key: np.asarray(data[key], dtype=np.float32) for key in data.files}
@@ -70,6 +82,22 @@ def load_d4rl_dataset(env_name: str) -> ArrayDict:
         if "terminals" in dataset
         else None,
     }
+
+
+def save_trajectory_cache(cache_dir: PathLike, data: ArrayDict) -> Path:
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    normalized = {
+        key: None if value is None else np.asarray(value, dtype=np.float32) for key, value in data.items()
+    }
+    with (cache_dir / "dataset.pkl").open("wb") as handle:
+        pickle.dump(normalized, handle)
+
+    for key, value in normalized.items():
+        if value is None:
+            continue
+        np.save(cache_dir / f"{key}.npy", value)
+    return cache_dir
 
 
 def build_dataloader(

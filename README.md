@@ -51,6 +51,8 @@ This version is implemented in `PyTorch` and is intended as a clean method scaff
   TGCVG-style value baseline entrypoint.
 - `vgks/train_vgks.py`
   VGKS training entrypoint.
+- `vgks/download_d4rl_dataset.py`
+  D4RL trajectory downloader that saves `dataset.pkl` and `.npy` cache files.
 - `examples/run_demo.py`
   A minimal script showing how to build the trainer and run one forward pass.
 - `examples/run_training_demo.py`
@@ -201,6 +203,31 @@ They also support two ways to choose the environment:
 
 This second form is the easiest way to switch between the standard D4RL splits for your paper experiments.
 
+## Downloading D4RL Trajectories First
+
+You asked for a TGCVG-like workflow where trajectories are downloaded first and then reused locally.
+
+This repository now supports that with:
+
+```bash
+python -m vgks.download_d4rl_dataset --task halfcheetah --dataset-name medium --output-dir data/d4rl
+```
+
+This will create a cache directory like:
+
+```text
+data/d4rl/halfcheetah-medium-v2/
+  dataset.pkl
+  observations.npy
+  actions.npy
+  next_observations.npy
+  rewards.npy
+  terminals.npy
+  meta.json
+```
+
+`VGKS` can then read that directory directly through `--dataset-path`.
+
 ### 3. Use the CLI parser
 
 The parser is exposed from `vgks.cli.build_parser()` and currently supports:
@@ -307,7 +334,7 @@ The returned dictionary contains averaged:
 - `mean_conservative_q`
 - `step_count`
 
-## Running The Real Training Entry
+## Running VGKS
 
 If you already have an offline dataset saved as `.npz` with:
 
@@ -333,31 +360,36 @@ For a fully local smoke run without any external files:
 python examples/run_training_demo.py
 ```
 
-### Example D4RL commands
+### Recommended VGKS workflow on the server
 
-BC:
-
-```bash
-python -m vgks.train_bc --task halfcheetah --dataset-name medium --hidden-dim 256 --epochs 50 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/bc/halfcheetah-medium-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group bc --wandb-name halfcheetah-medium-seed0
-```
-
-KATS:
+Step 1. Download and cache the D4RL trajectories:
 
 ```bash
-python -m vgks.train_kats --task halfcheetah --dataset-name medium-replay --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/kats/halfcheetah-medium-replay-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group kats --wandb-name halfcheetah-medium-replay-seed0
+python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium --output-dir data/d4rl
 ```
 
-TGCVG:
+Step 2. Train VGKS from the cached trajectory directory:
 
 ```bash
-python -m vgks.train_tgcvg --task hopper --dataset-name medium-expert --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/tgcvg/hopper-medium-expert-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group tgcvg --wandb-name hopper-medium-expert-seed0
+python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-seed0
 ```
 
-VGKS:
+Step 3. Repeat for the other splits:
 
 ```bash
-python -m vgks.train_vgks --task walker2d --dataset-name medium --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-seed0
+python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium-replay --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium-expert --output-dir data/d4rl
 ```
+
+and then:
+
+```bash
+python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-replay-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-replay-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-replay-seed0
+
+python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-expert-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-expert-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-expert-seed0
+```
+
+You can replace `walker2d` with `halfcheetah` or `hopper` in exactly the same pattern.
 
 After training, if `--save-dir` is set, the script writes:
 

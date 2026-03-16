@@ -1,4 +1,11 @@
-from vgks.data import OfflineReplayDataset, build_dataloader, load_d4rl_dataset, load_offline_dataset
+from vgks.data import (
+    OfflineReplayDataset,
+    build_dataloader,
+    load_d4rl_dataset,
+    load_offline_dataset,
+    save_trajectory_cache,
+)
+from vgks.download_d4rl_dataset import download_and_cache_dataset
 from vgks.data import OfflineReplayDataset, build_dataloader, load_d4rl_dataset, load_offline_dataset
 from vgks.envs import infer_env_dims, make_env, resolve_env_name
 from vgks.eval import evaluate_policy
@@ -22,6 +29,7 @@ __all__ = [
     "ValueGuidedKoopmanTrainer",
     "build_dataloader",
     "build_trainer_from_args",
+    "download_and_cache_dataset",
     "evaluate_policy",
     "export_augmented_dataset",
     "infer_env_dims",
@@ -30,6 +38,7 @@ __all__ = [
     "load_offline_dataset",
     "load_tgcvg_critic_checkpoint",
     "make_env",
+    "save_trajectory_cache",
     "resolve_env_name",
     "run_training",
     "run_bc_training",
