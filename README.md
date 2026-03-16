@@ -42,6 +42,8 @@ This version is implemented in `PyTorch` and is intended as a clean method scaff
   CLI parser for value-guidance hyperparameters.
 - `examples/run_demo.py`
   A minimal script showing how to build the trainer and run one forward pass.
+- `examples/run_training_demo.py`
+  A minimal end-to-end training example that builds a toy offline dataset and runs sigma training.
 - `tests/`
   Regression tests for the method behavior.
 - `docs/plans/`
@@ -115,6 +117,7 @@ This verifies:
 - changing `lambda_q` changes the total loss
 - augmentation can be filtered by Q threshold
 - the CLI exposes the value-guidance flags
+- the dataset and training entrypoint work end-to-end
 
 ### 3. Use the CLI parser
 
@@ -221,6 +224,32 @@ The returned dictionary contains averaged:
 - `latent_anchor_loss`
 - `mean_conservative_q`
 - `step_count`
+
+## Running The Real Training Entry
+
+If you already have an offline dataset saved as `.npz` with:
+
+- `observations`
+- `actions`
+- `next_observations`
+
+you can train with:
+
+```bash
+python -m vgks.train_vgks --dataset-path path/to/dataset.npz --state-dim 17 --action-dim 6 --latent-dim 32 --hidden-dim 512 --epochs 5 --batch-size 256
+```
+
+If you have compatible checkpoints:
+
+```bash
+python -m vgks.train_vgks --dataset-path path/to/dataset.npz --state-dim 17 --action-dim 6 --latent-dim 32 --hidden-dim 512 --kats-checkpoint path/to/kats_sysmodel.pth --critic-checkpoint path/to/tgcvg_checkpoint.pt --epochs 5
+```
+
+For a fully local smoke run without any external files:
+
+```bash
+python examples/run_training_demo.py
+```
 
 ## Current Limitations
 
