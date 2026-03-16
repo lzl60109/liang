@@ -19,6 +19,7 @@ This codebase currently provides a clean research prototype with:
 - inverse dynamics model for recovering actions from transformed latent pairs
 - conservative double-critic wrapper using `min(Q1, Q2)`
 - checkpoint adapters for KATS-style sysmodel weights and TGCVG-style critic weights
+- standalone training entrypoints for `BC`, `KATS`, `TGCVG`, and `VGKS`
 - value-aware sigma loss with:
   - Koopman commutation loss
   - conservative value loss
@@ -26,6 +27,8 @@ This codebase currently provides a clean research prototype with:
   - latent anchor loss
 - augmentation utilities with optional Q-threshold filtering
 - epoch-level sigma training over replay-style batches
+- shared normalized-score evaluation utilities
+- wandb-compatible experiment logging
 - tests that verify the fusion logic
 
 This version is implemented in `PyTorch` and is intended as a clean method scaffold and ablation-friendly reference implementation. It is not yet a full D4RL benchmark runner wired into the original KATS/TGCVG code, but the core value-guided sigma training logic is now differentiable and trainable.
@@ -40,6 +43,14 @@ This version is implemented in `PyTorch` and is intended as a clean method scaff
   Helpers for loading original KATS and TGCVG style checkpoints.
 - `vgks/cli.py`
   CLI parser for value-guidance hyperparameters.
+- `vgks/train_bc.py`
+  Behavior cloning baseline entrypoint.
+- `vgks/train_kats.py`
+  KATS-style augmentation baseline entrypoint.
+- `vgks/train_tgcvg.py`
+  TGCVG-style value baseline entrypoint.
+- `vgks/train_vgks.py`
+  VGKS training entrypoint.
 - `examples/run_demo.py`
   A minimal script showing how to build the trainer and run one forward pass.
 - `examples/run_training_demo.py`
@@ -102,6 +113,12 @@ For a minimal CPU-only or already-managed environment:
 pip install -r requirements.txt
 ```
 
+If you want online experiment logging:
+
+```bash
+wandb login
+```
+
 Notes:
 
 - Your server reports driver `535.247.01` and CUDA `12.2`, which is compatible with PyTorch `cu121` wheels in practice.
@@ -146,6 +163,43 @@ This verifies:
 - augmentation can be filtered by Q threshold
 - the CLI exposes the value-guidance flags
 - the dataset and training entrypoint work end-to-end
+
+## Baseline Training Scripts
+
+The repository now exposes four standalone training entrypoints:
+
+- `python -m vgks.train_bc`
+- `python -m vgks.train_kats`
+- `python -m vgks.train_tgcvg`
+- `python -m vgks.train_vgks`
+
+All four scripts support:
+
+- `--save-dir`
+- `--device`
+- `--seed`
+- `--use-wandb`
+- `--wandb-project`
+- `--wandb-group`
+- `--wandb-name`
+
+They also support two ways to choose the environment:
+
+1. Full D4RL environment name:
+
+```bash
+--env-name halfcheetah-medium-v2
+```
+
+2. Task plus split:
+
+```bash
+--task halfcheetah --dataset-name medium
+--task halfcheetah --dataset-name medium-replay
+--task halfcheetah --dataset-name medium-expert
+```
+
+This second form is the easiest way to switch between the standard D4RL splits for your paper experiments.
 
 ### 3. Use the CLI parser
 
@@ -279,10 +333,39 @@ For a fully local smoke run without any external files:
 python examples/run_training_demo.py
 ```
 
+### Example D4RL commands
+
+BC:
+
+```bash
+python -m vgks.train_bc --task halfcheetah --dataset-name medium --hidden-dim 256 --epochs 50 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/bc/halfcheetah-medium-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group bc --wandb-name halfcheetah-medium-seed0
+```
+
+KATS:
+
+```bash
+python -m vgks.train_kats --task halfcheetah --dataset-name medium-replay --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/kats/halfcheetah-medium-replay-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group kats --wandb-name halfcheetah-medium-replay-seed0
+```
+
+TGCVG:
+
+```bash
+python -m vgks.train_tgcvg --task hopper --dataset-name medium-expert --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/tgcvg/hopper-medium-expert-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group tgcvg --wandb-name hopper-medium-expert-seed0
+```
+
+VGKS:
+
+```bash
+python -m vgks.train_vgks --task walker2d --dataset-name medium --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-seed0
+```
+
 After training, if `--save-dir` is set, the script writes:
 
 - `metrics.json`
-- `sigma_model.pt`
+- `config.json`
+- `eval.json`
+- `checkpoint.pt`
+- `augmented_dataset.npz` for KATS, TGCVG, and VGKS
 
 to the specified output directory.
 
@@ -291,10 +374,12 @@ to the specified output directory.
 If your server environment already has `gym` and `d4rl` installed, you can also train directly from an environment name instead of a local `.npz` file:
 
 ```bash
-python -m vgks.train_vgks --env-name halfcheetah-medium-v2 --state-dim 17 --action-dim 6 --latent-dim 32 --hidden-dim 512 --epochs 5 --device cuda:0 --num-workers 4 --save-dir runs/halfcheetah_medium
+python -m vgks.train_vgks --env-name halfcheetah-medium-v2 --latent-dim 32 --hidden-dim 512 --epochs 5 --device cuda:0 --num-workers 4 --save-dir runs/halfcheetah_medium
 ```
 
 `d4rl` is not included in the default requirements files because it is often environment-specific and can require extra Mujoco setup.
+
+When `--env-name` or `--task + --dataset-name` is provided, the scripts will infer `state_dim` and `action_dim` automatically from the environment.
 
 ## Current Limitations
 

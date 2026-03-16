@@ -77,19 +77,32 @@ class TrainingEntryTests(unittest.TestCase):
             metrics = run_training(
                 trainer=trainer,
                 dataset_path=dataset_path,
+                env_name=None,
                 batch_size=4,
                 epochs=1,
                 shuffle=False,
                 num_workers=0,
                 save_dir=save_dir,
+                state_dim=3,
+                action_dim=2,
+                hidden_dim=8,
+                seed=0,
+                device="cpu",
+                use_wandb=False,
+                wandb_project="vgks-tests",
+                wandb_group="vgks",
+                wandb_name="toy-vgks",
+                eval_episodes=2,
             )
 
             self.assertTrue((save_dir / "metrics.json").exists())
-            self.assertTrue((save_dir / "sigma_model.pt").exists())
+            self.assertTrue((save_dir / "checkpoint.pt").exists())
+            self.assertTrue((save_dir / "augmented_dataset.npz").exists())
+            self.assertTrue((save_dir / "eval.json").exists())
 
         self.assertEqual(len(metrics), 1)
-        self.assertIn("total_loss", metrics[0])
-        self.assertIn("step_count", metrics[0])
+        self.assertIn("sigma", metrics[0])
+        self.assertIn("eval", metrics[0])
 
 
 if __name__ == "__main__":

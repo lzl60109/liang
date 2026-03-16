@@ -44,9 +44,22 @@ def main() -> None:
         metrics = run_training(
             trainer=trainer,
             dataset_path=dataset_path,
+            env_name=None,
             batch_size=8,
             epochs=2,
             shuffle=True,
+            num_workers=0,
+            save_dir=Path(tmpdir) / "outputs",
+            state_dim=3,
+            action_dim=2,
+            hidden_dim=16,
+            seed=0,
+            device="cpu",
+            use_wandb=False,
+            wandb_project="vgks-demo",
+            wandb_group="vgks",
+            wandb_name="toy-training-demo",
+            eval_episodes=2,
         )
 
     for epoch, epoch_metrics in enumerate(metrics, start=1):

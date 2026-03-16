@@ -4,12 +4,18 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import numpy as np
 import torch
 
 from vgks.cli import build_parser
 from vgks.data import OfflineReplayDataset, build_dataloader, load_d4rl_dataset, load_offline_dataset
+from vgks.envs import infer_env_dims, make_env, resolve_env_name
+from vgks.eval import evaluate_policy
+from vgks.export import export_augmented_dataset
 from vgks.integration import load_kats_checkpoint, load_tgcvg_critic_checkpoint
+from vgks.logging import ExperimentLogger
 from vgks.models import ConservativeCritic, KoopmanDynamicsModel, SigmaModel
+from vgks.train_bc import BCPolicy, ToyEvalEnv, train_bc_epoch
 from vgks.trainer import ValueGuidedKoopmanTrainer
 
 
@@ -74,9 +80,22 @@ def run_training(
     shuffle: bool = True,
     num_workers: int = 0,
     save_dir: Optional[Path] = None,
-) -> List[Dict[str, float]]:
+    state_dim: int,
+    action_dim: int,
+    hidden_dim: int,
+    seed: int,
+    device: str,
+    use_wandb: bool,
+    wandb_project: str,
+    wandb_group: str,
+    wandb_name: str,
+    eval_episodes: int = 10,
+) -> List[Dict[str, Dict[str, float]]]:
     if dataset_path is None and env_name is None:
         raise ValueError("run_training requires either dataset_path or env_name")
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
 
     if dataset_path is not None:
         data = load_offline_dataset(dataset_path)
@@ -84,8 +103,29 @@ def run_training(
         data = load_d4rl_dataset(env_name)
 
     dataset = OfflineReplayDataset(data)
-    metrics_history: List[Dict[str, float]] = []
-    for _ in range(epochs):
+    logger = None
+    if save_dir is not None:
+        logger = ExperimentLogger(
+            save_dir=save_dir,
+            use_wandb=use_wandb,
+            project=wandb_project,
+            group=wandb_group,
+            name=wandb_name,
+            config={
+                "method": "vgks",
+                "env_name": env_name,
+                "state_dim": state_dim,
+                "action_dim": action_dim,
+                "hidden_dim": hidden_dim,
+                "batch_size": batch_size,
+                "epochs": epochs,
+                "seed": seed,
+                "device": device,
+            },
+        )
+
+    sigma_history: List[Dict[str, float]] = []
+    for epoch in range(epochs):
         loader = build_dataloader(
             dataset,
             batch_size=batch_size,
@@ -93,32 +133,112 @@ def run_training(
             num_workers=num_workers,
         )
         epoch_metrics = trainer.train_sigma_epoch(loader)
-        metrics_history.append(epoch_metrics)
+        sigma_history.append(epoch_metrics)
+        if logger is not None:
+            logger.log_metrics({f"sigma/{k}": v for k, v in epoch_metrics.items() if k != "step_count"}, step=epoch + 1)
+
+    final_loader = build_dataloader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+    )
+    augmented_batches = [trainer.augment_batch(batch) for batch in final_loader]
+    augmented = {
+        key: torch.cat([batch[key] for batch in augmented_batches], dim=0)
+        for key in augmented_batches[0].keys()
+    }
+
+    combined = {
+        "observations": torch.cat(
+            [torch.tensor(data["observations"], dtype=torch.float32), augmented["observations"]], dim=0
+        ),
+        "actions": torch.cat(
+            [torch.tensor(data["actions"], dtype=torch.float32), augmented["actions"]], dim=0
+        ),
+        "next_observations": torch.cat(
+            [torch.tensor(data["next_observations"], dtype=torch.float32), augmented["next_observations"]],
+            dim=0,
+        ),
+    }
+    combined_dataset = OfflineReplayDataset({key: value.numpy() for key, value in combined.items()})
+    combined_loader = build_dataloader(
+        combined_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+    )
+
+    policy = BCPolicy(state_dim=state_dim, action_dim=action_dim, hidden_dim=hidden_dim).to(device)
+    optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
+    policy_metrics = {}
+    for epoch in range(epochs):
+        policy_metrics = train_bc_epoch(policy, combined_loader, optimizer, device)
+        if logger is not None:
+            logger.log_metrics({f"policy/{k}": v for k, v in policy_metrics.items()}, step=epoch + 1)
+
+    if env_name is None:
+        eval_env = ToyEvalEnv(state_dim, action_dim)
+    else:
+        from vgks.envs import make_env
+
+        eval_env = make_env(env_name)
+    eval_metrics = evaluate_policy(eval_env, policy, device=device, n_episodes=eval_episodes)
+
     if save_dir is not None:
         save_dir.mkdir(parents=True, exist_ok=True)
         with open(save_dir / "metrics.json", "w", encoding="utf-8") as handle:
-            json.dump(metrics_history, handle, indent=2)
-        torch.save(trainer.sigma_model.state_dict(), save_dir / "sigma_model.pt")
-    return metrics_history
+            json.dump(sigma_history, handle, indent=2)
+        export_augmented_dataset(save_dir / "augmented_dataset.npz", augmented)
+        torch.save(
+            {
+                "sigma_model": trainer.sigma_model.state_dict(),
+                "policy": policy.state_dict(),
+            },
+            save_dir / "checkpoint.pt",
+        )
+        if logger is not None:
+            logger.write_eval(eval_metrics)
+            logger.finish()
+
+    return [{"sigma": sigma_history[-1], "policy": policy_metrics, "eval": eval_metrics}]
 
 
 def main() -> None:
     parser = build_parser()
     parser.add_argument("--dataset-path", dest="dataset_path", type=str, default=None)
     parser.add_argument("--env-name", dest="env_name", type=str, default=None)
-    parser.add_argument("--state-dim", dest="state_dim", type=int, required=True)
-    parser.add_argument("--action-dim", dest="action_dim", type=int, required=True)
+    parser.add_argument("--task", dest="task", type=str, default=None)
+    parser.add_argument("--dataset-name", dest="dataset_name", type=str, default=None)
+    parser.add_argument("--state-dim", dest="state_dim", type=int, default=None)
+    parser.add_argument("--action-dim", dest="action_dim", type=int, default=None)
     parser.add_argument("--latent-dim", dest="latent_dim", type=int, default=32)
     parser.add_argument("--hidden-dim", dest="hidden_dim", type=int, default=256)
     parser.add_argument("--batch-size", dest="batch_size", type=int, default=256)
     parser.add_argument("--epochs", dest="epochs", type=int, default=1)
     parser.add_argument("--sigma-lr", dest="sigma_lr", type=float, default=1e-3)
     parser.add_argument("--save-dir", dest="save_dir", type=str, default=None)
+    parser.add_argument("--seed", dest="seed", type=int, default=0)
+    parser.add_argument("--use-wandb", dest="use_wandb", action="store_true")
+    parser.add_argument("--wandb-project", dest="wandb_project", type=str, default="vgks")
+    parser.add_argument("--wandb-group", dest="wandb_group", type=str, default="vgks")
+    parser.add_argument("--wandb-name", dest="wandb_name", type=str, default="vgks-run")
+    parser.add_argument("--eval-episodes", dest="eval_episodes", type=int, default=10)
     args = parser.parse_args()
 
+    resolved_env_name = resolve_env_name(args.env_name, args.task, args.dataset_name)
+    state_dim = args.state_dim
+    action_dim = args.action_dim
+    if resolved_env_name is not None and (state_dim is None or action_dim is None):
+        dims = infer_env_dims(make_env(resolved_env_name))
+        state_dim = dims["state_dim"]
+        action_dim = dims["action_dim"]
+    if state_dim is None or action_dim is None:
+        raise ValueError("state_dim and action_dim are required when env_name is not provided")
+
     trainer = build_trainer_from_args(
-        state_dim=args.state_dim,
-        action_dim=args.action_dim,
+        state_dim=state_dim,
+        action_dim=action_dim,
         latent_dim=args.latent_dim,
         hidden_dim=args.hidden_dim,
         lambda_q=args.lambda_q,
@@ -135,11 +255,21 @@ def main() -> None:
     metrics = run_training(
         trainer=trainer,
         dataset_path=Path(args.dataset_path) if args.dataset_path else None,
-        env_name=args.env_name,
+        env_name=resolved_env_name,
         batch_size=args.batch_size,
         epochs=args.epochs,
         num_workers=args.num_workers,
         save_dir=Path(args.save_dir) if args.save_dir else None,
+        state_dim=state_dim,
+        action_dim=action_dim,
+        hidden_dim=args.hidden_dim,
+        seed=args.seed,
+        device=args.device,
+        use_wandb=args.use_wandb,
+        wandb_project=args.wandb_project,
+        wandb_group=args.wandb_group,
+        wandb_name=args.wandb_name,
+        eval_episodes=args.eval_episodes,
     )
     for epoch, epoch_metrics in enumerate(metrics, start=1):
         print(f"Epoch {epoch}: {epoch_metrics}")
