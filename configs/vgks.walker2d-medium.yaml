@@ -1,0 +1,5 @@
+base_config: vgks.base.yaml
+dataset_path: data/d4rl/walker2d-medium-v2
+save_dir: runs/vgks/walker2d-medium-v2/seed_0
+wandb_name: walker2d-medium-seed0
+run_name: walker2d-medium-seed0

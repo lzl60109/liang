@@ -189,6 +189,22 @@ configs/vgks.yaml
 
 So after you edit that one file, you do not need to type the long command line each time.
 
+Internally, the project now uses:
+
+- one shared base config: `configs/vgks.base.yaml`
+- nine task presets:
+  - `configs/vgks.halfcheetah-medium.yaml`
+  - `configs/vgks.halfcheetah-medium-replay.yaml`
+  - `configs/vgks.halfcheetah-medium-expert.yaml`
+  - `configs/vgks.hopper-medium.yaml`
+  - `configs/vgks.hopper-medium-replay.yaml`
+  - `configs/vgks.hopper-medium-expert.yaml`
+  - `configs/vgks.walker2d-medium.yaml`
+  - `configs/vgks.walker2d-medium-replay.yaml`
+  - `configs/vgks.walker2d-medium-expert.yaml`
+
+So yes: Mujoco tasks mostly share one common YAML base, and only the dataset path, output path, and run naming differ across the nine presets.
+
 All four scripts support:
 
 - `--save-dir`
@@ -382,13 +398,25 @@ Step 1. Download and cache the D4RL trajectories:
 python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium --output-dir data/d4rl
 ```
 
-Step 2. Edit the default config file:
+Step 2. Choose one preset by editing:
 
 ```text
 configs/vgks.yaml
 ```
 
-At minimum, update:
+For example:
+
+```yaml
+base_config: vgks.walker2d-medium.yaml
+```
+
+or:
+
+```yaml
+base_config: vgks.hopper-medium-expert.yaml
+```
+
+If needed, also update:
 
 - `dataset_path`
 - `save_dir`
@@ -409,12 +437,7 @@ python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium-repla
 python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium-expert --output-dir data/d4rl
 ```
 
-Then update `configs/vgks.yaml` to point at:
-
-- `data/d4rl/walker2d-medium-replay-v2`
-- `data/d4rl/walker2d-medium-expert-v2`
-
-and run again:
+Then change `configs/vgks.yaml` to point at the replay or expert preset and run again:
 
 ```bash
 python train_vgks.py

@@ -28,6 +28,14 @@ def load_config_file(config_path: Path) -> Dict[str, object]:
         data = yaml.safe_load(handle) or {}
     if not isinstance(data, dict):
         raise ValueError("VGKS config must be a YAML mapping")
+    base_ref = data.pop("base_config", None)
+    if base_ref:
+        base_path = Path(base_ref)
+        if not base_path.is_absolute():
+            base_path = Path(config_path).parent / base_path
+        base_data = load_config_file(base_path)
+        base_data.update(data)
+        return base_data
     return data
 
 

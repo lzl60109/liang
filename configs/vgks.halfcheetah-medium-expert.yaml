@@ -1,0 +1,5 @@
+base_config: vgks.base.yaml
+dataset_path: data/d4rl/halfcheetah-medium-expert-v2
+save_dir: runs/vgks/halfcheetah-medium-expert-v2/seed_0
+wandb_name: halfcheetah-medium-expert-seed0
+run_name: halfcheetah-medium-expert-seed0
