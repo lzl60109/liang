@@ -22,4 +22,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sigma-warmup-steps", dest="sigma_warmup_steps", type=int, default=0)
     parser.add_argument("--kats-checkpoint", dest="kats_checkpoint", type=str, default=None)
     parser.add_argument("--critic-checkpoint", dest="critic_checkpoint", type=str, default=None)
+    parser.add_argument("--device", dest="device", type=str, default="cpu")
+    parser.add_argument("--num-workers", dest="num_workers", type=int, default=0)
     return parser

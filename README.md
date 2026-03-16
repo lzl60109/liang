@@ -83,10 +83,38 @@ The current prototype needs:
 - Python with `torch`
 - `unittest` for running tests, which is included with Python
 
-If your environment does not already have PyTorch:
+The repository now includes two install files:
+
+- `requirements.txt`
+  Minimal base dependencies
+- `requirements-gpu-cu121.txt`
+  GPU-oriented install file for NVIDIA servers using PyTorch CUDA 12.1 wheels
+
+For a typical Linux GPU server like your `RTX 4090` machine, use:
 
 ```bash
-pip install torch
+pip install -r requirements-gpu-cu121.txt
+```
+
+For a minimal CPU-only or already-managed environment:
+
+```bash
+pip install -r requirements.txt
+```
+
+Notes:
+
+- Your server reports driver `535.247.01` and CUDA `12.2`, which is compatible with PyTorch `cu121` wheels in practice.
+- If PyTorch is already installed on the server, you can skip reinstalling it and only install missing packages from `requirements.txt`.
+
+## Recommended Server Setup
+
+On your server, a common setup would be:
+
+```bash
+git clone https://github.com/lzl60109/liang.git
+cd liang
+pip install -r requirements-gpu-cu121.txt
 ```
 
 ## How To Run
@@ -236,13 +264,13 @@ If you already have an offline dataset saved as `.npz` with:
 you can train with:
 
 ```bash
-python -m vgks.train_vgks --dataset-path path/to/dataset.npz --state-dim 17 --action-dim 6 --latent-dim 32 --hidden-dim 512 --epochs 5 --batch-size 256
+python -m vgks.train_vgks --dataset-path path/to/dataset.npz --state-dim 17 --action-dim 6 --latent-dim 32 --hidden-dim 512 --epochs 5 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks_exp1
 ```
 
 If you have compatible checkpoints:
 
 ```bash
-python -m vgks.train_vgks --dataset-path path/to/dataset.npz --state-dim 17 --action-dim 6 --latent-dim 32 --hidden-dim 512 --kats-checkpoint path/to/kats_sysmodel.pth --critic-checkpoint path/to/tgcvg_checkpoint.pt --epochs 5
+python -m vgks.train_vgks --dataset-path path/to/dataset.npz --state-dim 17 --action-dim 6 --latent-dim 32 --hidden-dim 512 --kats-checkpoint path/to/kats_sysmodel.pth --critic-checkpoint path/to/tgcvg_checkpoint.pt --epochs 5 --device cuda:0 --num-workers 4 --save-dir runs/vgks_with_ckpt
 ```
 
 For a fully local smoke run without any external files:
@@ -251,12 +279,29 @@ For a fully local smoke run without any external files:
 python examples/run_training_demo.py
 ```
 
+After training, if `--save-dir` is set, the script writes:
+
+- `metrics.json`
+- `sigma_model.pt`
+
+to the specified output directory.
+
+## D4RL Mode
+
+If your server environment already has `gym` and `d4rl` installed, you can also train directly from an environment name instead of a local `.npz` file:
+
+```bash
+python -m vgks.train_vgks --env-name halfcheetah-medium-v2 --state-dim 17 --action-dim 6 --latent-dim 32 --hidden-dim 512 --epochs 5 --device cuda:0 --num-workers 4 --save-dir runs/halfcheetah_medium
+```
+
+`d4rl` is not included in the default requirements files because it is often environment-specific and can require extra Mujoco setup.
+
 ## Current Limitations
 
 - This is not yet the original full KATS or TGCVG training code.
 - The current implementation is a prototype method scaffold, not a full D4RL benchmark runner.
 - The current implementation uses simplified wrappers with KATS/TGCVG-compatible parameter names instead of directly importing the original training stacks.
-- Replay loading, D4RL environment setup, and full end-to-end experiment scripts are not yet wired in.
+- The training entry now supports `.npz` datasets and optional D4RL loading, but full end-to-end benchmark orchestration and experiment logging are still minimal.
 
 ## Recommended Next Step
 

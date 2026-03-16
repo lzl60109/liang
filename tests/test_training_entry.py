@@ -70,15 +70,22 @@ class TrainingEntryTests(unittest.TestCase):
                 sigma_lr=1e-2,
                 kats_checkpoint=None,
                 critic_checkpoint=None,
+                device="cpu",
             )
 
+            save_dir = tmpdir / "outputs"
             metrics = run_training(
                 trainer=trainer,
                 dataset_path=dataset_path,
                 batch_size=4,
                 epochs=1,
                 shuffle=False,
+                num_workers=0,
+                save_dir=save_dir,
             )
+
+            self.assertTrue((save_dir / "metrics.json").exists())
+            self.assertTrue((save_dir / "sigma_model.pt").exists())
 
         self.assertEqual(len(metrics), 1)
         self.assertIn("total_loss", metrics[0])

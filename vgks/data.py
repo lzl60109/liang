@@ -73,6 +73,9 @@ def load_d4rl_dataset(env_name: str) -> ArrayDict:
 
 
 def build_dataloader(
-    dataset: OfflineReplayDataset, batch_size: int = 256, shuffle: bool = True
+    dataset: OfflineReplayDataset,
+    batch_size: int = 256,
+    shuffle: bool = True,
+    num_workers: int = 0,
 ) -> DataLoader:
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
