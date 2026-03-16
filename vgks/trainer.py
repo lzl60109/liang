@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 import torch
 import torch.nn.functional as F
@@ -152,6 +152,29 @@ class ValueGuidedKoopmanTrainer:
         return {
             key: float(value.detach().cpu().item()) for key, value in tensor_metrics.items()
         }
+
+    def train_sigma_epoch(self, batches: Iterable[Dict[str, torch.Tensor]]) -> Dict[str, float]:
+        totals = {
+            "total_loss": 0.0,
+            "commutation_loss": 0.0,
+            "value_loss": 0.0,
+            "state_anchor_loss": 0.0,
+            "latent_anchor_loss": 0.0,
+            "mean_conservative_q": 0.0,
+        }
+        step_count = 0
+        for batch in batches:
+            step_metrics = self.train_sigma_step(batch)
+            step_count += 1
+            for key in totals:
+                totals[key] += step_metrics[key]
+
+        if step_count == 0:
+            raise ValueError("train_sigma_epoch requires at least one batch")
+
+        averaged = {key: value / step_count for key, value in totals.items()}
+        averaged["step_count"] = step_count
+        return averaged
 
     def augment_batch(
         self, batch: Dict[str, torch.Tensor], q_threshold: Optional[float] = None

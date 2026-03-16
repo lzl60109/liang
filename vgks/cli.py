@@ -20,4 +20,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--q-clip-max", dest="q_clip_max", type=float, default=20.0)
     parser.add_argument("--q-threshold", dest="q_threshold", type=float, default=None)
     parser.add_argument("--sigma-warmup-steps", dest="sigma_warmup_steps", type=int, default=0)
+    parser.add_argument("--kats-checkpoint", dest="kats_checkpoint", type=str, default=None)
+    parser.add_argument("--critic-checkpoint", dest="critic_checkpoint", type=str, default=None)
     return parser

@@ -18,12 +18,14 @@ This codebase currently provides a clean research prototype with:
 - latent symmetry operator `sigma`
 - inverse dynamics model for recovering actions from transformed latent pairs
 - conservative double-critic wrapper using `min(Q1, Q2)`
+- checkpoint adapters for KATS-style sysmodel weights and TGCVG-style critic weights
 - value-aware sigma loss with:
   - Koopman commutation loss
   - conservative value loss
   - state anchor loss
   - latent anchor loss
 - augmentation utilities with optional Q-threshold filtering
+- epoch-level sigma training over replay-style batches
 - tests that verify the fusion logic
 
 This version is implemented in `PyTorch` and is intended as a clean method scaffold and ablation-friendly reference implementation. It is not yet a full D4RL benchmark runner wired into the original KATS/TGCVG code, but the core value-guided sigma training logic is now differentiable and trainable.
@@ -33,7 +35,9 @@ This version is implemented in `PyTorch` and is intended as a clean method scaff
 - `vgks/models.py`
   Koopman dynamics model, sigma model, inverse dynamics model, and conservative critic.
 - `vgks/trainer.py`
-  The main VGKS logic: sigma loss computation and augmented batch generation.
+  The main VGKS logic: sigma loss computation, sigma optimization, and epoch training.
+- `vgks/integration.py`
+  Helpers for loading original KATS and TGCVG style checkpoints.
 - `vgks/cli.py`
   CLI parser for value-guidance hyperparameters.
 - `examples/run_demo.py`
@@ -123,6 +127,8 @@ The parser is exposed from `vgks.cli.build_parser()` and currently supports:
 - `--q-clip-max`
 - `--q-threshold`
 - `--sigma-warmup-steps`
+- `--kats-checkpoint`
+- `--critic-checkpoint`
 
 Example:
 
@@ -163,11 +169,65 @@ print(metrics)
 print(augmented["q_values"])
 ```
 
+## Loading Original Checkpoints
+
+The repo now includes adapters for the two source projects:
+
+```python
+from vgks import (
+    ConservativeCritic,
+    KoopmanDynamicsModel,
+    load_kats_checkpoint,
+    load_tgcvg_critic_checkpoint,
+)
+
+dynamics = KoopmanDynamicsModel(state_dim=17, action_dim=6, latent_dim=32, hidden_dim=512)
+critic = ConservativeCritic(state_dim=17, action_dim=6, hidden_dim=256)
+
+load_kats_checkpoint(dynamics, "path/to/kats_sysmodel.pth")
+load_tgcvg_critic_checkpoint(critic, "path/to/tgcvg_checkpoint.pt")
+```
+
+Expected formats:
+
+- KATS checkpoint:
+  contains `layer1`, `layer2`, `layer3`, `layerK`, `layer3inv`, `layer2inv`, `layer1inv`
+- TGCVG checkpoint:
+  contains `critic1` and `critic2`, or `critic_1` and `critic_2`
+
+## Running Epoch-Level Sigma Training
+
+You can now optimize `sigma` over a stream of replay-style batches:
+
+```python
+batches = [
+    {
+        "observations": torch.randn(256, 17),
+        "next_observations": torch.randn(256, 17),
+    }
+    for _ in range(100)
+]
+
+epoch_metrics = trainer.train_sigma_epoch(batches)
+print(epoch_metrics)
+```
+
+The returned dictionary contains averaged:
+
+- `total_loss`
+- `commutation_loss`
+- `value_loss`
+- `state_anchor_loss`
+- `latent_anchor_loss`
+- `mean_conservative_q`
+- `step_count`
+
 ## Current Limitations
 
 - This is not yet the original full KATS or TGCVG training code.
 - The current implementation is a prototype method scaffold, not a full D4RL benchmark runner.
-- The current implementation uses simplified MLP modules instead of directly importing the original KATS/TGCVG training stacks.
+- The current implementation uses simplified wrappers with KATS/TGCVG-compatible parameter names instead of directly importing the original training stacks.
+- Replay loading, D4RL environment setup, and full end-to-end experiment scripts are not yet wired in.
 
 ## Recommended Next Step
 

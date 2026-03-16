@@ -16,6 +16,8 @@ class CLITests(unittest.TestCase):
         self.assertEqual(args.q_clip_max, 20.0)
         self.assertIsNone(args.q_threshold)
         self.assertEqual(args.sigma_warmup_steps, 0)
+        self.assertIsNone(getattr(args, "kats_checkpoint", None))
+        self.assertIsNone(getattr(args, "critic_checkpoint", None))
 
 
 if __name__ == "__main__":
