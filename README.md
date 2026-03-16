@@ -26,9 +26,7 @@ This codebase currently provides a clean research prototype with:
 - augmentation utilities with optional Q-threshold filtering
 - tests that verify the fusion logic
 
-Note:
-
-This version is a lightweight `NumPy` prototype so it can run in the current environment without requiring PyTorch. It is intended as a clean method scaffold and ablation-friendly reference implementation. If you want, this can be extended next into a full PyTorch training pipeline wired directly into the original KATS/TGCVG code.
+This version is implemented in `PyTorch` and is intended as a clean method scaffold and ablation-friendly reference implementation. It is not yet a full D4RL benchmark runner wired into the original KATS/TGCVG code, but the core value-guided sigma training logic is now differentiable and trainable.
 
 ## Repository Layout
 
@@ -74,16 +72,15 @@ Where:
 
 ## Requirements
 
-The current prototype only needs:
+The current prototype needs:
 
-- Python 3.9+
-- `numpy`
-- `pytest` for running tests
+- Python with `torch`
+- `unittest` for running tests, which is included with Python
 
-You can install dependencies with:
+If your environment does not already have PyTorch:
 
 ```bash
-pip install numpy pytest
+pip install torch
 ```
 
 ## How To Run
@@ -104,7 +101,7 @@ Expected output:
 ### 2. Run the test suite
 
 ```bash
-pytest tests -v
+python -m unittest discover -s tests -v
 ```
 
 This verifies:
@@ -136,7 +133,7 @@ python -c "from vgks.cli import build_parser; print(build_parser().parse_args(['
 ## Minimal Python Example
 
 ```python
-import numpy as np
+import torch
 
 from vgks import ConservativeCritic, KoopmanDynamicsModel, SigmaModel, ValueGuidedKoopmanTrainer
 
@@ -155,8 +152,8 @@ trainer = ValueGuidedKoopmanTrainer(
 )
 
 batch = {
-    "observations": np.array([[0.2, -0.1, 0.3]], dtype=np.float32),
-    "next_observations": np.array([[0.25, -0.05, 0.35]], dtype=np.float32),
+    "observations": torch.tensor([[0.2, -0.1, 0.3]], dtype=torch.float32),
+    "next_observations": torch.tensor([[0.25, -0.05, 0.35]], dtype=torch.float32),
 }
 
 metrics = trainer.compute_sigma_loss(batch)
@@ -170,13 +167,13 @@ print(augmented["q_values"])
 
 - This is not yet the original full KATS or TGCVG training code.
 - The current implementation is a prototype method scaffold, not a full D4RL benchmark runner.
-- The environment used here does not currently include `torch`, so the prototype is implemented in `NumPy`.
+- The current implementation uses simplified MLP modules instead of directly importing the original KATS/TGCVG training stacks.
 
 ## Recommended Next Step
 
 If you want to continue, the next upgrade should be:
 
-1. Port the trainer to PyTorch
-2. Reuse the original KATS encoder/decoder and inverse model
-3. Load TGCVG CQL critic checkpoints directly
+1. Reuse the original KATS encoder/decoder and inverse model
+2. Load TGCVG CQL critic checkpoints directly
+3. Replace the prototype replay flow with real D4RL batches
 4. Train `sigma` with the value-aware objective on real offline RL datasets
