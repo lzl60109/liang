@@ -371,7 +371,7 @@ python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium --out
 Step 2. Train VGKS from the cached trajectory directory:
 
 ```bash
-python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-seed0
+python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-seed0 --eval-interval 1 --save-best --run-name walker2d-medium-seed0
 ```
 
 Step 3. Repeat for the other splits:
@@ -384,9 +384,9 @@ python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium-exper
 and then:
 
 ```bash
-python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-replay-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-replay-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-replay-seed0
+python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-replay-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-replay-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-replay-seed0 --eval-interval 1 --save-best --run-name walker2d-medium-replay-seed0
 
-python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-expert-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-expert-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-expert-seed0
+python -m vgks.train_vgks --dataset-path data/d4rl/walker2d-medium-expert-v2 --latent-dim 32 --hidden-dim 256 --epochs 20 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks/walker2d-medium-expert-v2/seed_0 --seed 0 --use-wandb --wandb-project vgks-paper --wandb-group vgks --wandb-name walker2d-medium-expert-seed0 --eval-interval 1 --save-best --run-name walker2d-medium-expert-seed0
 ```
 
 You can replace `walker2d` with `halfcheetah` or `hopper` in exactly the same pattern.
@@ -396,10 +396,21 @@ After training, if `--save-dir` is set, the script writes:
 - `metrics.json`
 - `config.json`
 - `eval.json`
+- `eval_history.json`
 - `checkpoint.pt`
+- `best_checkpoint.pt` when `--save-best` is enabled
+- `last_checkpoint.pt`
 - `augmented_dataset.npz` for KATS, TGCVG, and VGKS
 
 to the specified output directory.
+
+During training, `VGKS` now also prints periodic evaluation lines like:
+
+```text
+[Eval] epoch=10 sigma_loss=... policy_loss=... return=... normalized_score=... best=...
+```
+
+These same metrics are also logged to `wandb` when `--use-wandb` is enabled.
 
 ## D4RL Mode
 

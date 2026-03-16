@@ -100,9 +100,9 @@ class TrainingEntryTests(unittest.TestCase):
             self.assertTrue((save_dir / "augmented_dataset.npz").exists())
             self.assertTrue((save_dir / "eval.json").exists())
 
-        self.assertEqual(len(metrics), 1)
-        self.assertIn("sigma", metrics[0])
-        self.assertIn("eval", metrics[0])
+        self.assertIn("last", metrics)
+        self.assertIn("sigma", metrics["last"])
+        self.assertIn("eval", metrics["last"])
 
 
 if __name__ == "__main__":

@@ -62,8 +62,8 @@ def main() -> None:
             eval_episodes=2,
         )
 
-    for epoch, epoch_metrics in enumerate(metrics, start=1):
-        print(f"Epoch {epoch}: {epoch_metrics}")
+    print("Best normalized score:", metrics["best_normalized_score"])
+    print("Last eval:", metrics["last"]["eval"])
 
 
 if __name__ == "__main__":

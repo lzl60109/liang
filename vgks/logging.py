@@ -19,6 +19,7 @@ class ExperimentLogger:
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.metrics_path = self.save_dir / "metrics.jsonl"
+        self.stdout_path = self.save_dir / "stdout.log"
         (self.save_dir / "config.json").write_text(
             json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
         )
@@ -57,3 +58,7 @@ class ExperimentLogger:
     def finish(self) -> None:
         if self._wandb_run is not None:
             self._wandb_run.finish()
+
+    def log_text(self, message: str) -> None:
+        with self.stdout_path.open("a", encoding="utf-8") as handle:
+            handle.write(message + "\n")
