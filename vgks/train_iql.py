@@ -18,10 +18,12 @@ from vgks.offline_rl import (
     DeterministicActor,
     TwinQ,
     ValueNet,
+    infinite_batches,
     make_eval_env,
     make_offline_loader,
-    run_iql_epoch,
+    resolve_total_steps,
     save_training_outputs,
+    iql_train_step,
 )
 from vgks.experiment_logging import ExperimentLogger
 
@@ -34,7 +36,10 @@ def run_iql_training(
     action_dim: int,
     hidden_dim: int,
     batch_size: int,
-    epochs: int,
+    epochs: Optional[int] = None,
+    max_timesteps: Optional[int] = None,
+    eval_freq: int = 5000,
+    log_every: int = 1000,
     seed: int,
     device: str,
     save_dir: Path,
@@ -55,7 +60,16 @@ def run_iql_training(
         project=wandb_project,
         group=wandb_group,
         name=wandb_name,
-        config={"method": "iql", "env_name": env_name, "epochs": epochs, "seed": seed, "device": device},
+        config={
+            "method": "iql",
+            "env_name": env_name,
+            "epochs": epochs,
+            "max_timesteps": max_timesteps,
+            "eval_freq": eval_freq,
+            "log_every": log_every,
+            "seed": seed,
+            "device": device,
+        },
     )
 
     actor = DeterministicActor(state_dim, action_dim, hidden_dim).to(device)
@@ -65,22 +79,21 @@ def run_iql_training(
     critic_optimizer = torch.optim.Adam(critic.parameters(), lr=1e-3)
     value_optimizer = torch.optim.Adam(value_net.parameters(), lr=1e-3)
 
-    train_metrics = {}
-    for epoch in range(max(1, epochs)):
-        train_metrics = run_iql_epoch(
-            actor,
-            critic,
-            value_net,
-            actor_optimizer,
-            critic_optimizer,
-            value_optimizer,
-            loader,
-            device,
-        )
-        logger.log_metrics({f"train/{k}": v for k, v in train_metrics.items() if k != "step_count"}, step=epoch + 1)
-
     eval_env = make_eval_env(env_name, state_dim, action_dim)
-    eval_metrics = evaluate_policy(eval_env, actor, device=device, n_episodes=eval_episodes)
+    total_steps = resolve_total_steps(epochs, max_timesteps, loader)
+    train_metrics = {}
+    eval_metrics = {}
+    batch_iterator = infinite_batches(loader)
+    for step in range(total_steps):
+        train_metrics = iql_train_step(
+            actor, critic, value_net, actor_optimizer, critic_optimizer, value_optimizer, next(batch_iterator), device
+        )
+        if (step + 1) % max(1, log_every) == 0:
+            logger.log_metrics({f"train/{k}": v for k, v in train_metrics.items()}, step=step + 1)
+        if (step + 1) % max(1, eval_freq) == 0 or step == total_steps - 1:
+            eval_metrics = evaluate_policy(eval_env, actor, device=device, n_episodes=eval_episodes)
+            logger.log_metrics({f"eval/{k}": v for k, v in eval_metrics.items()}, step=step + 1)
+
     save_training_outputs(
         logger,
         {"actor": actor.state_dict(), "critic": critic.state_dict(), "value_net": value_net.state_dict(), "data_keys": list(data.keys())},
@@ -101,7 +114,10 @@ def main() -> None:
     parser.add_argument("--action-dim", dest="action_dim", type=int, default=None)
     parser.add_argument("--hidden-dim", dest="hidden_dim", type=int, default=256)
     parser.add_argument("--batch-size", dest="batch_size", type=int, default=256)
-    parser.add_argument("--epochs", dest="epochs", type=int, default=10)
+    parser.add_argument("--epochs", dest="epochs", type=int, default=None)
+    parser.add_argument("--max-timesteps", dest="max_timesteps", type=int, default=None)
+    parser.add_argument("--eval-freq", dest="eval_freq", type=int, default=None)
+    parser.add_argument("--log-every", dest="log_every", type=int, default=None)
     parser.add_argument("--seed", dest="seed", type=int, default=0)
     parser.add_argument("--device", dest="device", type=str, default="cpu")
     parser.add_argument("--save-dir", dest="save_dir", type=str, default=None)
@@ -121,6 +137,9 @@ def main() -> None:
         hidden_dim=None,
         batch_size=None,
         epochs=None,
+        max_timesteps=None,
+        eval_freq=None,
+        log_every=None,
         seed=None,
         device=None,
         save_dir=None,
@@ -159,7 +178,10 @@ def main() -> None:
         action_dim=action_dim,
         hidden_dim=merged["hidden_dim"],
         batch_size=merged["batch_size"],
-        epochs=merged["epochs"],
+        epochs=merged.get("epochs"),
+        max_timesteps=merged.get("max_timesteps"),
+        eval_freq=merged.get("eval_freq", 5000),
+        log_every=merged.get("log_every", 1000),
         seed=merged["seed"],
         device=merged["device"],
         save_dir=Path(merged["save_dir"]),

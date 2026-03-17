@@ -4,11 +4,14 @@ state_dim:
 action_dim:
 hidden_dim: 256
 batch_size: 256
-epochs: 20
+epochs:
+max_timesteps: 1000000
+eval_freq: 5000
+log_every: 1000
 seed: 0
 device: cuda:0
 save_dir: runs/cql/halfcheetah-medium-v2/seed_0
-use_wandb: true
+use_wandb: false
 wandb_project: vgks-paper
 wandb_group: cql
 wandb_name: cql-halfcheetah-medium-seed0
