@@ -1,542 +1,131 @@
-# Value-Guided Koopman Symmetry
+# VGKS Run Commands
 
-This repository contains a runnable prototype of `Value-Guided Koopman Symmetry (VGKS)`, a fusion of:
-
-- `KATS`: Koopman-assisted trajectory synthesis
-- `TGCVG`: conservative value guidance
-
-The core idea is to learn a `value-aware symmetry operator` in latent Koopman space. Instead of training the symmetry operator only with a dynamics consistency objective, VGKS adds a conservative Q-guidance term so that generated transitions are both:
-
-- dynamically plausible
-- biased toward higher-value behavior
-
-## What Is Implemented
-
-This codebase currently provides a clean research prototype with:
-
-- Koopman-style encoder, decoder, and latent transition model
-- latent symmetry operator `sigma`
-- inverse dynamics model for recovering actions from transformed latent pairs
-- conservative double-critic wrapper using `min(Q1, Q2)`
-- checkpoint adapters for KATS-style sysmodel weights and TGCVG-style critic weights
-- standalone training entrypoints for `BC`, `KATS`, `TGCVG`, and `VGKS`
-- value-aware sigma loss with:
-  - Koopman commutation loss
-  - conservative value loss
-  - state anchor loss
-  - latent anchor loss
-- augmentation utilities with optional Q-threshold filtering
-- epoch-level sigma training over replay-style batches
-- shared normalized-score evaluation utilities
-- wandb-compatible experiment logging
-- tests that verify the fusion logic
-
-This version is implemented in `PyTorch` and is intended as a clean method scaffold and ablation-friendly reference implementation. It is not yet a full D4RL benchmark runner wired into the original KATS/TGCVG code, but the core value-guided sigma training logic is now differentiable and trainable.
-
-## Repository Layout
-
-- `vgks/models.py`
-  Koopman dynamics model, sigma model, inverse dynamics model, and conservative critic.
-- `vgks/trainer.py`
-  The main VGKS logic: sigma loss computation, sigma optimization, and epoch training.
-- `vgks/integration.py`
-  Helpers for loading original KATS and TGCVG style checkpoints.
-- `vgks/cli.py`
-  CLI parser for value-guidance hyperparameters.
-- `vgks/train_bc.py`
-  Behavior cloning baseline entrypoint.
-- `vgks/train_kats.py`
-  KATS-style augmentation baseline entrypoint.
-- `vgks/train_tgcvg.py`
-  TGCVG-style value baseline entrypoint.
-- `vgks/train_vgks.py`
-  VGKS training entrypoint.
-- `vgks/download_d4rl_dataset.py`
-  D4RL trajectory downloader that saves `dataset.pkl` and `.npy` cache files.
-- `examples/run_demo.py`
-  A minimal script showing how to build the trainer and run one forward pass.
-- `examples/run_training_demo.py`
-  A minimal end-to-end training example that builds a toy offline dataset and runs sigma training.
-- `tests/`
-  Regression tests for the method behavior.
-- `docs/plans/`
-  Design and implementation plan documents for this fusion method.
-
-## Method
-
-Let:
-
-- `z_t = E(s_t)`
-- `z_{t+1} = E(s_{t+1})`
-- `hat_z_t = sigma(z_t)`
-- `hat_z_{t+1} = sigma(z_{t+1})`
-- `hat_s_t = D(hat_z_t)`
-- `hat_s_{t+1} = D(hat_z_{t+1})`
-- `hat_a_t = g(hat_z_t, hat_z_{t+1})`
-
-The sigma operator is trained with:
-
-`L_total = L_comm + lambda_q * L_value + lambda_state * L_state_anchor + lambda_latent * L_latent_anchor`
-
-Where:
-
-- `L_comm`
-  Encourages Koopman commutation consistency.
-- `L_value`
-  Maximizes the conservative lower-bound value `min(Q1, Q2)`.
-- `L_state_anchor`
-  Keeps decoded augmented states near the original observations.
-- `L_latent_anchor`
-  Keeps sigma from drifting too far away from the original latent states.
-
-## Requirements
-
-The current prototype needs:
-
-- Python with `torch`
-- `unittest` for running tests, which is included with Python
-
-The repository now includes two install files:
-
-- `requirements.txt`
-  Minimal base dependencies
-- `requirements-gpu-cu121.txt`
-  GPU-oriented install file for NVIDIA servers using PyTorch CUDA 12.1 wheels
-
-For a typical Linux GPU server like your `RTX 4090` machine, use:
+## Install
 
 ```bash
 pip install -r requirements-gpu-cu121.txt
-```
-
-For a minimal CPU-only or already-managed environment:
-
-```bash
-pip install -r requirements.txt
-```
-
-If you want online experiment logging:
-
-```bash
 wandb login
 ```
 
-Notes:
+## Train
 
-- Your server reports driver `535.247.01` and CUDA `12.2`, which is compatible with PyTorch `cu121` wheels in practice.
-- If PyTorch is already installed on the server, you can skip reinstalling it and only install missing packages from `requirements.txt`.
+1. Edit [configs/vgks.yaml](/H:/codex_test/nips2026/configs/vgks.yaml)
+2. Set:
 
-## Recommended Server Setup
-
-On your server, a common setup would be:
-
-```bash
-git clone https://github.com/lzl60109/liang.git
-cd liang
-pip install -r requirements-gpu-cu121.txt
+```yaml
+base_config: your-preset.yaml
 ```
 
-## How To Run
-
-### 1. Run the demo
-
-From the repository root:
-
-```bash
-python examples/run_demo.py
-```
-
-Expected output:
-
-- a block of sigma loss metrics
-- the shapes of the generated augmented batch
-
-### 2. Run the test suite
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-This verifies:
-
-- conservative Q uses the lower critic value
-- sigma metrics include value and anchor terms
-- changing `lambda_q` changes the total loss
-- augmentation can be filtered by Q threshold
-- the CLI exposes the value-guidance flags
-- the dataset and training entrypoint work end-to-end
-
-## Baseline Training Scripts
-
-The repository now exposes four standalone training entrypoints:
-
-- `python -m vgks.train_bc`
-- `python -m vgks.train_kats`
-- `python -m vgks.train_tgcvg`
-- `python -m vgks.train_vgks`
-
-For `VGKS`, there is also a root-level shortcut:
+3. Run:
 
 ```bash
 python train_vgks.py
 ```
 
-By default it reads:
+## Download D4RL Datasets
 
-```text
-configs/vgks.yaml
-```
-
-So after you edit that one file, you do not need to type the long command line each time.
-
-Internally, the project now uses:
-
-- one shared global base config: `configs/vgks.base.yaml`
-- five family base configs:
-  - `configs/vgks.mujoco.base.yaml`
-  - `configs/vgks.maze2d.base.yaml`
-  - `configs/vgks.antmaze.base.yaml`
-  - `configs/vgks.adroit.base.yaml`
-  - `configs/vgks.kitchen.base.yaml`
-- Mujoco presets:
-  - `configs/vgks.halfcheetah-medium.yaml`
-  - `configs/vgks.halfcheetah-medium-replay.yaml`
-  - `configs/vgks.halfcheetah-medium-expert.yaml`
-  - `configs/vgks.hopper-medium.yaml`
-  - `configs/vgks.hopper-medium-replay.yaml`
-  - `configs/vgks.hopper-medium-expert.yaml`
-  - `configs/vgks.walker2d-medium.yaml`
-  - `configs/vgks.walker2d-medium-replay.yaml`
-  - `configs/vgks.walker2d-medium-expert.yaml`
-- Maze2D presets:
-  - `configs/vgks.maze2d-umaze.yaml`
-  - `configs/vgks.maze2d-medium.yaml`
-  - `configs/vgks.maze2d-large.yaml`
-- AntMaze presets:
-  - `configs/vgks.antmaze-umaze-diverse.yaml`
-  - `configs/vgks.antmaze-umaze-play.yaml`
-  - `configs/vgks.antmaze-medium-diverse.yaml`
-  - `configs/vgks.antmaze-medium-play.yaml`
-  - `configs/vgks.antmaze-large-diverse.yaml`
-  - `configs/vgks.antmaze-large-play.yaml`
-- Adroit presets:
-  - `configs/vgks.pen-human.yaml`
-  - `configs/vgks.hammer-human.yaml`
-  - `configs/vgks.door-human.yaml`
-  - `configs/vgks.relocate-human.yaml`
-- Kitchen presets:
-  - `configs/vgks.kitchen-complete.yaml`
-  - `configs/vgks.kitchen-partial.yaml`
-  - `configs/vgks.kitchen-mixed.yaml`
-  - `configs/vgks.kitchen-undirected.yaml`
-
-So yes: Mujoco tasks share one common family YAML base, while Maze2D, AntMaze, Adroit, and Kitchen each get their own more conservative family defaults. This keeps one clean workflow while giving harder domains safer anchors and weaker value guidance.
-
-All four scripts support:
-
-- `--save-dir`
-- `--device`
-- `--seed`
-- `--use-wandb`
-- `--wandb-project`
-- `--wandb-group`
-- `--wandb-name`
-
-They also support two ways to choose the environment:
-
-1. Full D4RL environment name:
+### Mujoco
 
 ```bash
---env-name halfcheetah-medium-v2
+python -m vgks.download_d4rl_dataset --env-name halfcheetah-medium-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name halfcheetah-medium-replay-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name halfcheetah-medium-expert-v2 --output-dir data/d4rl
+
+python -m vgks.download_d4rl_dataset --env-name hopper-medium-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name hopper-medium-replay-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name hopper-medium-expert-v2 --output-dir data/d4rl
+
+python -m vgks.download_d4rl_dataset --env-name walker2d-medium-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name walker2d-medium-replay-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name walker2d-medium-expert-v2 --output-dir data/d4rl
 ```
 
-2. Task plus split:
+### Maze2D
 
 ```bash
---task halfcheetah --dataset-name medium
---task halfcheetah --dataset-name medium-replay
---task halfcheetah --dataset-name medium-expert
+python -m vgks.download_d4rl_dataset --env-name maze2d-umaze-v1 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name maze2d-medium-v1 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name maze2d-large-v1 --output-dir data/d4rl
 ```
 
-This second form is the easiest way to switch between the standard D4RL splits for your paper experiments.
-
-For the newly added non-locomotion domains, the easiest path is to point `configs/vgks.yaml` at a preset and then run:
+### AntMaze
 
 ```bash
-python train_vgks.py
-```
-
-Examples:
-
-- `base_config: vgks.antmaze-large-play.yaml`
-- `base_config: vgks.pen-human.yaml`
-- `base_config: vgks.kitchen-mixed.yaml`
-
-## Downloading D4RL Trajectories First
-
-You asked for a TGCVG-like workflow where trajectories are downloaded first and then reused locally.
-
-This repository now supports that with:
-
-```bash
-python -m vgks.download_d4rl_dataset --task halfcheetah --dataset-name medium --output-dir data/d4rl
-```
-
-This will create a cache directory like:
-
-```text
-data/d4rl/halfcheetah-medium-v2/
-  dataset.pkl
-  observations.npy
-  actions.npy
-  next_observations.npy
-  rewards.npy
-  terminals.npy
-  meta.json
-```
-
-`VGKS` can then read that directory directly through `--dataset-path`.
-
-For environments outside the Mujoco locomotion defaults, prefer the explicit environment name when downloading:
-
-```bash
+python -m vgks.download_d4rl_dataset --env-name antmaze-umaze-diverse-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name antmaze-umaze-play-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name antmaze-medium-diverse-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name antmaze-medium-play-v2 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name antmaze-large-diverse-v2 --output-dir data/d4rl
 python -m vgks.download_d4rl_dataset --env-name antmaze-large-play-v2 --output-dir data/d4rl
+```
+
+### Adroit
+
+```bash
 python -m vgks.download_d4rl_dataset --env-name pen-human-v1 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name hammer-human-v1 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name door-human-v1 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name relocate-human-v1 --output-dir data/d4rl
+```
+
+### Kitchen
+
+```bash
+python -m vgks.download_d4rl_dataset --env-name kitchen-complete-v0 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name kitchen-partial-v0 --output-dir data/d4rl
 python -m vgks.download_d4rl_dataset --env-name kitchen-mixed-v0 --output-dir data/d4rl
+python -m vgks.download_d4rl_dataset --env-name kitchen-undirected-v0 --output-dir data/d4rl
 ```
 
-### 3. Use the CLI parser
+## Preset Names For `configs/vgks.yaml`
 
-The parser is exposed from `vgks.cli.build_parser()` and currently supports:
-
-- `--lambda-q`
-- `--lambda-state-anchor`
-- `--lambda-latent-anchor`
-- `--q-clip-min`
-- `--q-clip-max`
-- `--q-threshold`
-- `--sigma-warmup-steps`
-- `--kats-checkpoint`
-- `--critic-checkpoint`
-
-Example:
-
-```bash
-python -c "from vgks.cli import build_parser; print(build_parser().parse_args(['--lambda-q','0.2','--q-threshold','1.5']))"
-```
-
-## Minimal Python Example
-
-```python
-import torch
-
-from vgks import ConservativeCritic, KoopmanDynamicsModel, SigmaModel, ValueGuidedKoopmanTrainer
-
-dynamics = KoopmanDynamicsModel(state_dim=3, action_dim=2, latent_dim=4, hidden_dim=16)
-sigma = SigmaModel(latent_dim=4)
-critic = ConservativeCritic(state_dim=3, action_dim=2, hidden_dim=16)
-
-trainer = ValueGuidedKoopmanTrainer(
-    dynamics=dynamics,
-    sigma_model=sigma,
-    critic=critic,
-    action_dim=2,
-    lambda_q=0.1,
-    lambda_state_anchor=1.0,
-    lambda_latent_anchor=0.1,
-)
-
-batch = {
-    "observations": torch.tensor([[0.2, -0.1, 0.3]], dtype=torch.float32),
-    "next_observations": torch.tensor([[0.25, -0.05, 0.35]], dtype=torch.float32),
-}
-
-metrics = trainer.compute_sigma_loss(batch)
-augmented = trainer.augment_batch(batch)
-
-print(metrics)
-print(augmented["q_values"])
-```
-
-## Loading Original Checkpoints
-
-The repo now includes adapters for the two source projects:
-
-```python
-from vgks import (
-    ConservativeCritic,
-    KoopmanDynamicsModel,
-    load_kats_checkpoint,
-    load_tgcvg_critic_checkpoint,
-)
-
-dynamics = KoopmanDynamicsModel(state_dim=17, action_dim=6, latent_dim=32, hidden_dim=512)
-critic = ConservativeCritic(state_dim=17, action_dim=6, hidden_dim=256)
-
-load_kats_checkpoint(dynamics, "path/to/kats_sysmodel.pth")
-load_tgcvg_critic_checkpoint(critic, "path/to/tgcvg_checkpoint.pt")
-```
-
-Expected formats:
-
-- KATS checkpoint:
-  contains `layer1`, `layer2`, `layer3`, `layerK`, `layer3inv`, `layer2inv`, `layer1inv`
-- TGCVG checkpoint:
-  contains `critic1` and `critic2`, or `critic_1` and `critic_2`
-
-## Running Epoch-Level Sigma Training
-
-You can now optimize `sigma` over a stream of replay-style batches:
-
-```python
-batches = [
-    {
-        "observations": torch.randn(256, 17),
-        "next_observations": torch.randn(256, 17),
-    }
-    for _ in range(100)
-]
-
-epoch_metrics = trainer.train_sigma_epoch(batches)
-print(epoch_metrics)
-```
-
-The returned dictionary contains averaged:
-
-- `total_loss`
-- `commutation_loss`
-- `value_loss`
-- `state_anchor_loss`
-- `latent_anchor_loss`
-- `mean_conservative_q`
-- `step_count`
-
-## Running VGKS
-
-If you already have an offline dataset saved as `.npz` with:
-
-- `observations`
-- `actions`
-- `next_observations`
-
-you can train with:
-
-```bash
-python -m vgks.train_vgks --dataset-path path/to/dataset.npz --state-dim 17 --action-dim 6 --latent-dim 32 --hidden-dim 512 --epochs 5 --batch-size 256 --device cuda:0 --num-workers 4 --save-dir runs/vgks_exp1
-```
-
-If you have compatible checkpoints:
-
-```bash
-python -m vgks.train_vgks --dataset-path path/to/dataset.npz --state-dim 17 --action-dim 6 --latent-dim 32 --hidden-dim 512 --kats-checkpoint path/to/kats_sysmodel.pth --critic-checkpoint path/to/tgcvg_checkpoint.pt --epochs 5 --device cuda:0 --num-workers 4 --save-dir runs/vgks_with_ckpt
-```
-
-For a fully local smoke run without any external files:
-
-```bash
-python examples/run_training_demo.py
-```
-
-### Recommended VGKS workflow on the server
-
-Step 1. Download and cache the D4RL trajectories:
-
-```bash
-python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium --output-dir data/d4rl
-```
-
-Step 2. Choose one preset by editing:
-
-```text
-configs/vgks.yaml
-```
-
-For example:
+### Mujoco
 
 ```yaml
-base_config: vgks.walker2d-medium.yaml
-```
-
-or:
-
-```yaml
+base_config: vgks.halfcheetah-medium.yaml
+base_config: vgks.halfcheetah-medium-replay.yaml
+base_config: vgks.halfcheetah-medium-expert.yaml
+base_config: vgks.hopper-medium.yaml
+base_config: vgks.hopper-medium-replay.yaml
 base_config: vgks.hopper-medium-expert.yaml
+base_config: vgks.walker2d-medium.yaml
+base_config: vgks.walker2d-medium-replay.yaml
+base_config: vgks.walker2d-medium-expert.yaml
 ```
 
-If needed, also update:
+### Maze2D
 
-- `dataset_path`
-- `save_dir`
-- `wandb_name`
-- `run_name`
-- optionally `device`
-
-Step 3. Train VGKS directly:
-
-```bash
-python train_vgks.py
+```yaml
+base_config: vgks.maze2d-umaze.yaml
+base_config: vgks.maze2d-medium.yaml
+base_config: vgks.maze2d-large.yaml
 ```
 
-Step 4. Repeat for the other splits:
+### AntMaze
 
-```bash
-python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium-replay --output-dir data/d4rl
-python -m vgks.download_d4rl_dataset --task walker2d --dataset-name medium-expert --output-dir data/d4rl
+```yaml
+base_config: vgks.antmaze-umaze-diverse.yaml
+base_config: vgks.antmaze-umaze-play.yaml
+base_config: vgks.antmaze-medium-diverse.yaml
+base_config: vgks.antmaze-medium-play.yaml
+base_config: vgks.antmaze-large-diverse.yaml
+base_config: vgks.antmaze-large-play.yaml
 ```
 
-Then change `configs/vgks.yaml` to point at the replay or expert preset and run again:
+### Adroit
 
-```bash
-python train_vgks.py
+```yaml
+base_config: vgks.pen-human.yaml
+base_config: vgks.hammer-human.yaml
+base_config: vgks.door-human.yaml
+base_config: vgks.relocate-human.yaml
 ```
 
-You can replace `walker2d` with `halfcheetah` or `hopper` in exactly the same pattern by changing the cache path in `configs/vgks.yaml`.
+### Kitchen
 
-After training, if `--save-dir` is set, the script writes:
-
-- `metrics.json`
-- `config.json`
-- `eval.json`
-- `eval_history.json`
-- `checkpoint.pt`
-- `best_checkpoint.pt` when `--save-best` is enabled
-- `last_checkpoint.pt`
-- `augmented_dataset.npz` for KATS, TGCVG, and VGKS
-
-to the specified output directory.
-
-During training, `VGKS` now also prints periodic evaluation lines like:
-
-```text
-[Eval] epoch=10 sigma_loss=... policy_loss=... return=... normalized_score=... best=...
+```yaml
+base_config: vgks.kitchen-complete.yaml
+base_config: vgks.kitchen-partial.yaml
+base_config: vgks.kitchen-mixed.yaml
+base_config: vgks.kitchen-undirected.yaml
 ```
-
-These same metrics are also logged to `wandb` when `--use-wandb` is enabled.
-
-## D4RL Mode
-
-If your server environment already has `gym` and `d4rl` installed, you can also train directly from an environment name instead of a local `.npz` file:
-
-```bash
-python -m vgks.train_vgks --env-name halfcheetah-medium-v2 --latent-dim 32 --hidden-dim 512 --epochs 5 --device cuda:0 --num-workers 4 --save-dir runs/halfcheetah_medium
-```
-
-`d4rl` is not included in the default requirements files because it is often environment-specific and can require extra Mujoco setup.
-
-When `--env-name` or `--task + --dataset-name` is provided, the scripts will infer `state_dim` and `action_dim` automatically from the environment.
-
-## Current Limitations
-
-- This is not yet the original full KATS or TGCVG training code.
-- The current implementation is a prototype method scaffold, not a full D4RL benchmark runner.
-- The current implementation uses simplified wrappers with KATS/TGCVG-compatible parameter names instead of directly importing the original training stacks.
-- The training entry now supports `.npz` datasets and optional D4RL loading, but full end-to-end benchmark orchestration and experiment logging are still minimal.
-
-## Recommended Next Step
-
-If you want to continue, the next upgrade should be:
-
-1. Reuse the original KATS encoder/decoder and inverse model
-2. Load TGCVG CQL critic checkpoints directly
-3. Replace the prototype replay flow with real D4RL batches
-4. Train `sigma` with the value-aware objective on real offline RL datasets
