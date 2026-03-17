@@ -1,0 +1,16 @@
+dataset_path: data/aug/halfcheetah-medium-v2/halfcheetah-medium-v2.pkl
+env_name: halfcheetah-medium-v2
+state_dim:
+action_dim:
+hidden_dim: 256
+batch_size: 256
+epochs: 20
+seed: 0
+device: cuda:0
+save_dir: runs/iql/halfcheetah-medium-v2/seed_0
+use_wandb: true
+wandb_project: vgks-paper
+wandb_group: iql
+wandb_name: iql-halfcheetah-medium-seed0
+eval_episodes: 10
+num_workers: 4

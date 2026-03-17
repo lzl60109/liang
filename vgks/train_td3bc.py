@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Dict, Optional
+
+import numpy as np
+import torch
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from vgks.envs import infer_env_dims, make_env, resolve_env_name
+from vgks.eval import evaluate_policy
+from vgks.train_vgks import infer_dims_from_dataset_source, load_config_file, merge_config_with_args
+from vgks.offline_rl import (
+    DeterministicActor,
+    TwinQ,
+    make_eval_env,
+    make_offline_loader,
+    run_td3bc_epoch,
+    save_training_outputs,
+)
+from vgks.experiment_logging import ExperimentLogger
+
+
+def run_td3bc_training(
+    *,
+    dataset_path: Optional[Path],
+    env_name: Optional[str],
+    state_dim: int,
+    action_dim: int,
+    hidden_dim: int,
+    batch_size: int,
+    epochs: int,
+    seed: int,
+    device: str,
+    save_dir: Path,
+    use_wandb: bool,
+    wandb_project: str,
+    wandb_group: str,
+    wandb_name: str,
+    eval_episodes: int = 10,
+    num_workers: int = 0,
+) -> Dict[str, Dict[str, float]]:
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    data, loader = make_offline_loader(dataset_path, env_name, batch_size, num_workers)
+    logger = ExperimentLogger(
+        save_dir=save_dir,
+        use_wandb=use_wandb,
+        project=wandb_project,
+        group=wandb_group,
+        name=wandb_name,
+        config={"method": "td3bc", "env_name": env_name, "epochs": epochs, "seed": seed, "device": device},
+    )
+
+    actor = DeterministicActor(state_dim, action_dim, hidden_dim).to(device)
+    critic = TwinQ(state_dim, action_dim, hidden_dim).to(device)
+    target_critic = TwinQ(state_dim, action_dim, hidden_dim).to(device)
+    target_critic.load_state_dict(critic.state_dict())
+    actor_optimizer = torch.optim.Adam(actor.parameters(), lr=1e-3)
+    critic_optimizer = torch.optim.Adam(critic.parameters(), lr=1e-3)
+
+    train_metrics = {}
+    for epoch in range(max(1, epochs)):
+        train_metrics = run_td3bc_epoch(actor, critic, target_critic, actor_optimizer, critic_optimizer, loader, device)
+        logger.log_metrics({f"train/{k}": v for k, v in train_metrics.items() if k != "step_count"}, step=epoch + 1)
+
+    eval_env = make_eval_env(env_name, state_dim, action_dim)
+    eval_metrics = evaluate_policy(eval_env, actor, device=device, n_episodes=eval_episodes)
+    save_training_outputs(
+        logger,
+        {"actor": actor.state_dict(), "critic": critic.state_dict(), "data_keys": list(data.keys())},
+        save_dir,
+        eval_metrics,
+    )
+    return {"train": train_metrics, "eval": eval_metrics}
+
+
+def main() -> None:
+    parser = __import__("argparse").ArgumentParser(description="Train TD3+BC on offline data")
+    parser.add_argument("--config", dest="config", type=str, default=None)
+    parser.add_argument("--dataset-path", dest="dataset_path", type=str, default=None)
+    parser.add_argument("--env-name", dest="env_name", type=str, default=None)
+    parser.add_argument("--task", dest="task", type=str, default=None)
+    parser.add_argument("--dataset-name", dest="dataset_name", type=str, default=None)
+    parser.add_argument("--state-dim", dest="state_dim", type=int, default=None)
+    parser.add_argument("--action-dim", dest="action_dim", type=int, default=None)
+    parser.add_argument("--hidden-dim", dest="hidden_dim", type=int, default=256)
+    parser.add_argument("--batch-size", dest="batch_size", type=int, default=256)
+    parser.add_argument("--epochs", dest="epochs", type=int, default=10)
+    parser.add_argument("--seed", dest="seed", type=int, default=0)
+    parser.add_argument("--device", dest="device", type=str, default="cpu")
+    parser.add_argument("--save-dir", dest="save_dir", type=str, required=True)
+    parser.add_argument("--use-wandb", dest="use_wandb", action="store_true")
+    parser.add_argument("--wandb-project", dest="wandb_project", type=str, default="vgks")
+    parser.add_argument("--wandb-group", dest="wandb_group", type=str, default="td3bc")
+    parser.add_argument("--wandb-name", dest="wandb_name", type=str, default="td3bc-run")
+    parser.add_argument("--eval-episodes", dest="eval_episodes", type=int, default=10)
+    parser.add_argument("--num-workers", dest="num_workers", type=int, default=0)
+    parser.set_defaults(
+        dataset_path=None,
+        env_name=None,
+        task=None,
+        dataset_name=None,
+        state_dim=None,
+        action_dim=None,
+        hidden_dim=None,
+        batch_size=None,
+        epochs=None,
+        seed=None,
+        device=None,
+        save_dir=None,
+        use_wandb=None,
+        wandb_project=None,
+        wandb_group=None,
+        wandb_name=None,
+        eval_episodes=None,
+        num_workers=None,
+    )
+    args = parser.parse_args()
+
+    config = load_config_file(Path(args.config)) if args.config else {}
+    merged = merge_config_with_args(config, vars(args))
+    resolved_env_name = resolve_env_name(merged.get("env_name"), merged.get("task"), merged.get("dataset_name"))
+    dataset_path = Path(merged["dataset_path"]) if merged.get("dataset_path") else None
+    state_dim = merged.get("state_dim")
+    action_dim = merged.get("action_dim")
+    if dataset_path is not None and (state_dim is None or action_dim is None):
+        dims = infer_dims_from_dataset_source(dataset_path)
+        state_dim = dims["state_dim"]
+        action_dim = dims["action_dim"]
+    if resolved_env_name is not None and (state_dim is None or action_dim is None):
+        dims = infer_env_dims(make_env(resolved_env_name))
+        state_dim = dims["state_dim"]
+        action_dim = dims["action_dim"]
+    if state_dim is None or action_dim is None:
+        raise ValueError("state_dim and action_dim are required when env_name is not provided")
+
+    metrics = run_td3bc_training(
+        dataset_path=dataset_path,
+        env_name=resolved_env_name,
+        state_dim=state_dim,
+        action_dim=action_dim,
+        hidden_dim=merged["hidden_dim"],
+        batch_size=merged["batch_size"],
+        epochs=merged["epochs"],
+        seed=merged["seed"],
+        device=merged["device"],
+        save_dir=Path(merged["save_dir"]),
+        use_wandb=bool(merged["use_wandb"]),
+        wandb_project=merged["wandb_project"],
+        wandb_group=merged["wandb_group"],
+        wandb_name=merged["wandb_name"],
+        eval_episodes=merged["eval_episodes"],
+        num_workers=merged["num_workers"],
+    )
+    print(json.dumps(metrics, indent=2))
+
+
+if __name__ == "__main__":
+    main()

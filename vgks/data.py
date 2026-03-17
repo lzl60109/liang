@@ -32,6 +32,29 @@ def flatten_trajectory_list(paths: List[Trajectory]) -> ArrayDict:
     return flattened
 
 
+def replay_to_trajectory_list(data: ArrayDict) -> List[Trajectory]:
+    normalized = _normalize_array_dict(data)
+    terminals = normalized.get("terminals")
+    num_steps = int(normalized["observations"].shape[0])
+    if terminals is None:
+        terminals = np.zeros(num_steps, dtype=np.float32)
+        terminals[-1] = 1.0
+
+    paths: List[Trajectory] = []
+    start = 0
+    for idx in range(num_steps):
+        terminal = bool(terminals[idx]) or idx == num_steps - 1
+        if terminal:
+            path = {}
+            for key, value in normalized.items():
+                if value is None:
+                    continue
+                path[key] = np.asarray(value[start : idx + 1], dtype=np.float32)
+            paths.append(path)
+            start = idx + 1
+    return paths
+
+
 class OfflineReplayDataset(Dataset):
     def __init__(self, data: ArrayDict) -> None:
         required = {"observations", "actions", "next_observations"}

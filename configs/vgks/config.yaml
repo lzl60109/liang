@@ -1,0 +1,28 @@
+dataset_path: data/halfcheetah-medium-v2.pkl
+env_name:
+task:
+dataset_name:
+state_dim:
+action_dim:
+latent_dim: 32
+hidden_dim: 256
+batch_size: 256
+epochs: 20
+sigma_lr: 0.001
+device: cuda:0
+num_workers: 4
+seed: 0
+use_wandb: true
+wandb_project: vgks-paper
+wandb_group: vgks-generate
+wandb_name: vgks-generate-halfcheetah-medium
+save_dir: data/aug/halfcheetah-medium-v2
+run_name: halfcheetah-medium-v2
+lambda_q: 0.1
+lambda_state_anchor: 1.0
+lambda_latent_anchor: 0.1
+q_clip_min: -20.0
+q_clip_max: 20.0
+sigma_warmup_steps: 0
+kats_checkpoint:
+critic_checkpoint:
