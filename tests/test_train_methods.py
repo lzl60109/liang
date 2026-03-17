@@ -13,6 +13,7 @@ import yaml
 
 from vgks.offline_rl import (
     StableTD3BCTrainer,
+    build_td3bc_training_data,
     format_eval_progress,
     format_train_progress,
 )
@@ -25,6 +26,114 @@ from vgks.train_vgks import build_trainer_from_args
 
 
 class MethodTrainingTests(unittest.TestCase):
+    def test_build_td3bc_dataset_uses_raw_only_when_mix_ratio_zero(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            raw_path = tmpdir / "raw.npz"
+            aug_path = tmpdir / "aug.npz"
+            np.savez(
+                raw_path,
+                observations=np.zeros((10, 3), dtype=np.float32),
+                actions=np.zeros((10, 2), dtype=np.float32),
+                next_observations=np.zeros((10, 3), dtype=np.float32),
+                rewards=np.zeros(10, dtype=np.float32),
+                terminals=np.zeros(10, dtype=np.float32),
+            )
+            np.savez(
+                aug_path,
+                observations=np.ones((8, 3), dtype=np.float32),
+                actions=np.ones((8, 2), dtype=np.float32),
+                next_observations=np.ones((8, 3), dtype=np.float32),
+                rewards=np.ones(8, dtype=np.float32),
+                terminals=np.zeros(8, dtype=np.float32),
+            )
+
+            data = build_td3bc_training_data(raw_dataset_path=raw_path, aug_dataset_path=aug_path, mix_aug_ratio=0.0, seed=0)
+
+            self.assertEqual(data["observations"].shape[0], 10)
+            self.assertTrue(np.allclose(data["observations"], 0.0))
+
+    def test_build_td3bc_dataset_mixes_augmented_subset(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            raw_path = tmpdir / "raw.npz"
+            aug_path = tmpdir / "aug.npz"
+            np.savez(
+                raw_path,
+                observations=np.zeros((10, 3), dtype=np.float32),
+                actions=np.zeros((10, 2), dtype=np.float32),
+                next_observations=np.zeros((10, 3), dtype=np.float32),
+                rewards=np.zeros(10, dtype=np.float32),
+                terminals=np.zeros(10, dtype=np.float32),
+            )
+            np.savez(
+                aug_path,
+                observations=np.ones((8, 3), dtype=np.float32),
+                actions=np.ones((8, 2), dtype=np.float32),
+                next_observations=np.ones((8, 3), dtype=np.float32),
+                rewards=np.ones(8, dtype=np.float32),
+                terminals=np.zeros(8, dtype=np.float32),
+            )
+
+            data = build_td3bc_training_data(raw_dataset_path=raw_path, aug_dataset_path=aug_path, mix_aug_ratio=0.2, seed=0)
+
+            self.assertEqual(data["observations"].shape[0], 12)
+            self.assertEqual(int((data["observations"] == 1.0).all(axis=1).sum()), 2)
+
+    def test_td3bc_config_includes_aug_mixture_fields(self):
+        config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/td3bc.yaml").read_text(encoding="utf-8"))
+
+        for key in ("raw_dataset_path", "aug_dataset_path", "mix_aug_ratio"):
+            self.assertIn(key, config)
+
+    def test_run_td3bc_training_accepts_raw_and_aug_dataset_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            raw_path = tmpdir / "raw.npz"
+            aug_path = tmpdir / "aug.npz"
+            np.savez(
+                raw_path,
+                observations=np.random.randn(24, 3).astype(np.float32),
+                actions=np.random.uniform(-1.0, 1.0, size=(24, 2)).astype(np.float32),
+                next_observations=np.random.randn(24, 3).astype(np.float32),
+                rewards=np.random.randn(24).astype(np.float32),
+                terminals=np.zeros(24, dtype=np.float32),
+            )
+            np.savez(
+                aug_path,
+                observations=np.random.randn(12, 3).astype(np.float32),
+                actions=np.random.uniform(-1.0, 1.0, size=(12, 2)).astype(np.float32),
+                next_observations=np.random.randn(12, 3).astype(np.float32),
+                rewards=np.random.randn(12).astype(np.float32),
+                terminals=np.zeros(12, dtype=np.float32),
+            )
+
+            metrics = run_td3bc_training(
+                dataset_path=None,
+                raw_dataset_path=raw_path,
+                aug_dataset_path=aug_path,
+                mix_aug_ratio=0.25,
+                env_name=None,
+                state_dim=3,
+                action_dim=2,
+                hidden_dim=16,
+                batch_size=8,
+                max_timesteps=4,
+                eval_freq=2,
+                log_every=1,
+                seed=0,
+                device="cpu",
+                save_dir=tmpdir / "runs" / "td3bc_mix",
+                use_wandb=False,
+                wandb_project="vgks-tests",
+                wandb_group="td3bc",
+                wandb_name="mix-td3bc",
+                eval_episodes=2,
+                num_workers=0,
+            )
+
+            self.assertIn("normalized_score", metrics["eval"])
+
     def test_stable_td3bc_train_step_uses_policy_delay(self):
         trainer = StableTD3BCTrainer(
             state_dim=3,

@@ -21,7 +21,7 @@ from vgks.offline_rl import (
     format_train_progress,
     infinite_batches,
     make_eval_env,
-    make_offline_loader,
+    make_td3bc_loader,
     resolve_total_steps,
     save_training_outputs,
 )
@@ -31,6 +31,9 @@ from vgks.experiment_logging import ExperimentLogger
 def run_td3bc_training(
     *,
     dataset_path: Optional[Path],
+    raw_dataset_path: Optional[Path] = None,
+    aug_dataset_path: Optional[Path] = None,
+    mix_aug_ratio: float = 0.0,
     env_name: Optional[str],
     state_dim: int,
     action_dim: int,
@@ -60,7 +63,16 @@ def run_td3bc_training(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    data, loader = make_offline_loader(dataset_path, env_name, batch_size, num_workers)
+    data, loader = make_td3bc_loader(
+        dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=aug_dataset_path,
+        env_name=env_name,
+        mix_aug_ratio=mix_aug_ratio,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        seed=seed,
+    )
     logger = ExperimentLogger(
         save_dir=save_dir,
         use_wandb=use_wandb,
@@ -76,6 +88,7 @@ def run_td3bc_training(
             "log_every": log_every,
             "seed": seed,
             "device": device,
+            "mix_aug_ratio": mix_aug_ratio,
         },
     )
 
@@ -130,6 +143,9 @@ def main() -> None:
     parser = __import__("argparse").ArgumentParser(description="Train TD3+BC on offline data")
     parser.add_argument("--config", dest="config", type=str, default=None)
     parser.add_argument("--dataset-path", dest="dataset_path", type=str, default=None)
+    parser.add_argument("--raw-dataset-path", dest="raw_dataset_path", type=str, default=None)
+    parser.add_argument("--aug-dataset-path", dest="aug_dataset_path", type=str, default=None)
+    parser.add_argument("--mix-aug-ratio", dest="mix_aug_ratio", type=float, default=None)
     parser.add_argument("--env-name", dest="env_name", type=str, default=None)
     parser.add_argument("--task", dest="task", type=str, default=None)
     parser.add_argument("--dataset-name", dest="dataset_name", type=str, default=None)
@@ -152,6 +168,9 @@ def main() -> None:
     parser.add_argument("--num-workers", dest="num_workers", type=int, default=0)
     parser.set_defaults(
         dataset_path=None,
+        raw_dataset_path=None,
+        aug_dataset_path=None,
+        mix_aug_ratio=None,
         env_name=None,
         task=None,
         dataset_name=None,
@@ -179,10 +198,13 @@ def main() -> None:
     merged = merge_config_with_args(config, vars(args))
     resolved_env_name = resolve_env_name(merged.get("env_name"), merged.get("task"), merged.get("dataset_name"))
     dataset_path = Path(merged["dataset_path"]) if merged.get("dataset_path") else None
+    raw_dataset_path = Path(merged["raw_dataset_path"]) if merged.get("raw_dataset_path") else None
+    aug_dataset_path = Path(merged["aug_dataset_path"]) if merged.get("aug_dataset_path") else None
     state_dim = merged.get("state_dim")
     action_dim = merged.get("action_dim")
-    if dataset_path is not None and (state_dim is None or action_dim is None):
-        dims = infer_dims_from_dataset_source(dataset_path)
+    dims_source = dataset_path or raw_dataset_path or aug_dataset_path
+    if dims_source is not None and (state_dim is None or action_dim is None):
+        dims = infer_dims_from_dataset_source(dims_source)
         state_dim = dims["state_dim"]
         action_dim = dims["action_dim"]
     if resolved_env_name is not None and (state_dim is None or action_dim is None):
@@ -196,6 +218,9 @@ def main() -> None:
 
     metrics = run_td3bc_training(
         dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=aug_dataset_path,
+        mix_aug_ratio=float(merged.get("mix_aug_ratio", 0.0) or 0.0),
         env_name=resolved_env_name,
         state_dim=state_dim,
         action_dim=action_dim,

@@ -163,6 +163,85 @@ def make_offline_loader(
     return data, loader
 
 
+def _concat_array_dicts(left: Dict[str, np.ndarray], right: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    keys = sorted(set(left.keys()) | set(right.keys()))
+    merged = {}
+    for key in keys:
+        left_value = left.get(key)
+        right_value = right.get(key)
+        if left_value is None and right_value is None:
+            merged[key] = None
+        elif left_value is None:
+            merged[key] = np.asarray(right_value, dtype=np.float32)
+        elif right_value is None:
+            merged[key] = np.asarray(left_value, dtype=np.float32)
+        else:
+            merged[key] = np.concatenate(
+                [np.asarray(left_value, dtype=np.float32), np.asarray(right_value, dtype=np.float32)],
+                axis=0,
+            )
+    return merged
+
+
+def build_td3bc_training_data(
+    *,
+    dataset_path: Optional[Path] = None,
+    raw_dataset_path: Optional[Path] = None,
+    aug_dataset_path: Optional[Path] = None,
+    env_name: Optional[str] = None,
+    mix_aug_ratio: float = 0.0,
+    seed: int = 0,
+) -> Dict[str, np.ndarray]:
+    if dataset_path is not None:
+        return ensure_rewards_and_terminals(load_training_dataset(dataset_path, env_name))
+
+    if raw_dataset_path is None:
+        return ensure_rewards_and_terminals(load_training_dataset(None, env_name))
+
+    raw_data = ensure_rewards_and_terminals(load_offline_dataset(raw_dataset_path))
+    if aug_dataset_path is None or mix_aug_ratio <= 0.0:
+        return raw_data
+
+    aug_data = ensure_rewards_and_terminals(load_offline_dataset(aug_dataset_path))
+    raw_size = int(raw_data["observations"].shape[0])
+    aug_size = int(aug_data["observations"].shape[0])
+    take = min(aug_size, int(round(raw_size * mix_aug_ratio)))
+    if take <= 0:
+        return raw_data
+
+    rng = np.random.default_rng(seed)
+    indices = rng.choice(aug_size, size=take, replace=False)
+    aug_subset = {
+        key: None if value is None else np.asarray(value, dtype=np.float32)[indices]
+        for key, value in aug_data.items()
+    }
+    return _concat_array_dicts(raw_data, aug_subset)
+
+
+def make_td3bc_loader(
+    *,
+    dataset_path: Optional[Path],
+    raw_dataset_path: Optional[Path],
+    aug_dataset_path: Optional[Path],
+    env_name: Optional[str],
+    mix_aug_ratio: float,
+    batch_size: int,
+    num_workers: int,
+    seed: int,
+):
+    data = build_td3bc_training_data(
+        dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=aug_dataset_path,
+        env_name=env_name,
+        mix_aug_ratio=mix_aug_ratio,
+        seed=seed,
+    )
+    dataset = OfflineReplayDataset(data)
+    loader = build_dataloader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    return data, loader
+
+
 def infinite_batches(loader):
     while True:
         for batch in loader:

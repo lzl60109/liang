@@ -1,4 +1,7 @@
 dataset_path: data/aug/halfcheetah-medium-v2/halfcheetah-medium-v2.pkl
+raw_dataset_path:
+aug_dataset_path:
+mix_aug_ratio: 0.0
 env_name: halfcheetah-medium-v2
 state_dim:
 action_dim:
