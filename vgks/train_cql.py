@@ -92,7 +92,7 @@ def main() -> None:
     parser.add_argument("--epochs", dest="epochs", type=int, default=10)
     parser.add_argument("--seed", dest="seed", type=int, default=0)
     parser.add_argument("--device", dest="device", type=str, default="cpu")
-    parser.add_argument("--save-dir", dest="save_dir", type=str, required=True)
+    parser.add_argument("--save-dir", dest="save_dir", type=str, default=None)
     parser.add_argument("--use-wandb", dest="use_wandb", action="store_true")
     parser.add_argument("--wandb-project", dest="wandb_project", type=str, default="vgks")
     parser.add_argument("--wandb-group", dest="wandb_group", type=str, default="cql")
@@ -137,6 +137,8 @@ def main() -> None:
         action_dim = dims["action_dim"]
     if state_dim is None or action_dim is None:
         raise ValueError("state_dim and action_dim are required when env_name is not provided")
+    if merged.get("save_dir") is None:
+        raise ValueError("save_dir is required")
 
     metrics = run_cql_training(
         dataset_path=dataset_path,

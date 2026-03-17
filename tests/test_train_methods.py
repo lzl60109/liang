@@ -1,6 +1,8 @@
 import tempfile
 import unittest
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 
@@ -14,6 +16,51 @@ from vgks.train_vgks import build_trainer_from_args
 
 
 class MethodTrainingTests(unittest.TestCase):
+    def test_offline_rl_cli_accepts_config_without_save_dir_flag(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            dataset_path = tmpdir / "dataset.npz"
+            np.savez(
+                dataset_path,
+                observations=np.random.randn(8, 3).astype(np.float32),
+                actions=np.random.randn(8, 2).astype(np.float32),
+                next_observations=np.random.randn(8, 3).astype(np.float32),
+                rewards=np.random.randn(8).astype(np.float32),
+                terminals=np.zeros(8, dtype=np.float32),
+            )
+            config_path = tmpdir / "td3bc.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        f"dataset_path: {dataset_path.as_posix()}",
+                        "state_dim: 3",
+                        "action_dim: 2",
+                        "hidden_dim: 16",
+                        "batch_size: 4",
+                        "epochs: 1",
+                        "seed: 0",
+                        "device: cpu",
+                        f"save_dir: {(tmpdir / 'runs').as_posix()}",
+                        "use_wandb: false",
+                        "wandb_project: vgks-tests",
+                        "wandb_group: td3bc",
+                        "wandb_name: cli-td3bc",
+                        "eval_episodes: 2",
+                        "num_workers: 0",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, "train_td3bc.py", "--config", str(config_path)],
+                cwd=Path("H:/codex_test/nips2026"),
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+
     def test_offline_rl_entrypoints_train_on_generated_vgks_dataset(self):
         observations = np.random.randn(16, 3).astype(np.float32)
         actions = np.random.randn(16, 2).astype(np.float32)
