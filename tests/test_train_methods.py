@@ -9,7 +9,13 @@ from io import StringIO
 import numpy as np
 
 from vgks.generate_vgks import generate_augmented_dataset, save_generated_dataset
-from vgks.offline_rl import format_eval_progress, format_train_progress
+import yaml
+
+from vgks.offline_rl import (
+    StableTD3BCTrainer,
+    format_eval_progress,
+    format_train_progress,
+)
 from vgks.train_cql import run_cql_training
 from vgks.train_iql import run_iql_training
 from vgks.train_kats import run_kats_training
@@ -19,6 +25,74 @@ from vgks.train_vgks import build_trainer_from_args
 
 
 class MethodTrainingTests(unittest.TestCase):
+    def test_stable_td3bc_train_step_uses_policy_delay(self):
+        trainer = StableTD3BCTrainer(
+            state_dim=3,
+            action_dim=2,
+            hidden_dim=16,
+            max_action=1.0,
+            device="cpu",
+            policy_freq=2,
+        )
+        batch = {
+            "observations": __import__("torch").randn(4, 3),
+            "actions": __import__("torch").randn(4, 2).clamp(-1.0, 1.0),
+            "next_observations": __import__("torch").randn(4, 3),
+            "rewards": __import__("torch").randn(4),
+            "terminals": __import__("torch").zeros(4),
+        }
+
+        step1 = trainer.train_step(batch)
+        step2 = trainer.train_step(batch)
+
+        self.assertIn("critic_loss", step1)
+        self.assertIn("q_mean", step1)
+        self.assertIsNone(step1["actor_loss"])
+        self.assertIsNotNone(step2["actor_loss"])
+
+    def test_td3bc_config_includes_stability_hyperparameters(self):
+        config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/td3bc.yaml").read_text(encoding="utf-8"))
+
+        for key in ("discount", "tau", "policy_noise", "noise_clip", "policy_freq", "alpha"):
+            self.assertIn(key, config)
+
+    def test_run_td3bc_training_reports_stable_metrics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            dataset_path = tmpdir / "dataset.npz"
+            np.savez(
+                dataset_path,
+                observations=np.random.randn(32, 3).astype(np.float32),
+                actions=np.random.uniform(-1.0, 1.0, size=(32, 2)).astype(np.float32),
+                next_observations=np.random.randn(32, 3).astype(np.float32),
+                rewards=np.random.randn(32).astype(np.float32),
+                terminals=np.zeros(32, dtype=np.float32),
+            )
+
+            metrics = run_td3bc_training(
+                dataset_path=dataset_path,
+                env_name=None,
+                state_dim=3,
+                action_dim=2,
+                hidden_dim=16,
+                batch_size=8,
+                max_timesteps=4,
+                eval_freq=2,
+                log_every=1,
+                seed=0,
+                device="cpu",
+                save_dir=tmpdir / "runs" / "td3bc_stable",
+                use_wandb=False,
+                wandb_project="vgks-tests",
+                wandb_group="td3bc",
+                wandb_name="stable-td3bc",
+                eval_episodes=2,
+                num_workers=0,
+            )
+
+            self.assertIn("q_mean", metrics["train"])
+            self.assertIn("normalized_score", metrics["eval"])
+
     def test_format_train_progress_includes_step_and_losses(self):
         line = format_train_progress("td3bc", step=1000, total_steps=5000, metrics={"actor_loss": 1.25, "critic_loss": 0.5})
 

@@ -35,12 +35,16 @@ def _format_metric_items(metrics: Dict[str, float]) -> str:
             seen.add(key)
             display_key = "return" if key == "raw_return" else key
             value = metrics[key]
+            if value is None:
+                continue
             if isinstance(value, (int, float, np.floating, np.integer)):
                 parts.append(f"{display_key}={float(value):.4f}")
             else:
                 parts.append(f"{display_key}={value}")
     for key, value in metrics.items():
         if key in seen:
+            continue
+        if value is None:
             continue
         if isinstance(value, (int, float, np.floating, np.integer)):
             parts.append(f"{key}={float(value):.4f}")
@@ -73,6 +77,18 @@ class DeterministicActor(nn.Module):
         return self.network(observations.float())
 
 
+class NormalizedPolicy(nn.Module):
+    def __init__(self, actor: nn.Module, state_mean: np.ndarray, state_std: np.ndarray) -> None:
+        super().__init__()
+        self.actor = actor
+        self.register_buffer("state_mean", torch.tensor(state_mean, dtype=torch.float32))
+        self.register_buffer("state_std", torch.tensor(state_std, dtype=torch.float32))
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        normalized = (observations.float() - self.state_mean) / self.state_std
+        return self.actor(normalized)
+
+
 class TwinQ(nn.Module):
     def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = 256) -> None:
         super().__init__()
@@ -88,6 +104,12 @@ class TwinQ(nn.Module):
     def forward(self, observations: torch.Tensor, actions: torch.Tensor):
         sa = torch.cat([observations, actions], dim=1)
         return self.q1(sa), self.q2(sa)
+
+    def q1_value(self, observations: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        return self.q1(torch.cat([observations, actions], dim=1))
+
+    def q2_value(self, observations: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        return self.q2(torch.cat([observations, actions], dim=1))
 
     def conservative(self, observations: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         q1, q2 = self.forward(observations, actions)
@@ -125,6 +147,13 @@ def ensure_rewards_and_terminals(data: Dict[str, np.ndarray]) -> Dict[str, np.nd
     return normalized
 
 
+def compute_state_stats(data: Dict[str, np.ndarray], eps: float = 1e-3) -> Dict[str, np.ndarray]:
+    observations = np.asarray(data["observations"], dtype=np.float32)
+    state_mean = observations.mean(axis=0).astype(np.float32)
+    state_std = (observations.std(axis=0) + eps).astype(np.float32)
+    return {"state_mean": state_mean, "state_std": state_std}
+
+
 def make_offline_loader(
     dataset_path: Optional[Path], env_name: Optional[str], batch_size: int, num_workers: int
 ):
@@ -158,6 +187,106 @@ def resolve_total_steps(epochs: Optional[int], max_timesteps: Optional[int], loa
     if epochs is None:
         raise ValueError("Either epochs or max_timesteps must be provided")
     return int(max(1, epochs) * max(1, len(loader)))
+
+
+class StableTD3BCTrainer:
+    def __init__(
+        self,
+        *,
+        state_dim: int,
+        action_dim: int,
+        hidden_dim: int,
+        max_action: float,
+        device: str,
+        state_mean: Optional[np.ndarray] = None,
+        state_std: Optional[np.ndarray] = None,
+        discount: float = 0.99,
+        tau: float = 0.005,
+        policy_noise: float = 0.2,
+        noise_clip: float = 0.5,
+        policy_freq: int = 2,
+        alpha: float = 2.5,
+        actor_lr: float = 3e-4,
+        critic_lr: float = 3e-4,
+    ) -> None:
+        self.device = device
+        self.max_action = float(max_action)
+        self.discount = discount
+        self.tau = tau
+        self.policy_noise = policy_noise
+        self.noise_clip = noise_clip
+        self.policy_freq = policy_freq
+        self.alpha = alpha
+        self.total_it = 0
+        self.state_mean = np.asarray(state_mean if state_mean is not None else np.zeros(state_dim), dtype=np.float32)
+        self.state_std = np.asarray(state_std if state_std is not None else np.ones(state_dim), dtype=np.float32)
+        self.state_mean_tensor = torch.tensor(self.state_mean, dtype=torch.float32, device=device)
+        self.state_std_tensor = torch.tensor(self.state_std, dtype=torch.float32, device=device)
+
+        self.actor = DeterministicActor(state_dim, action_dim, hidden_dim).to(device)
+        self.actor_target = copy.deepcopy(self.actor)
+        self.critic = TwinQ(state_dim, action_dim, hidden_dim).to(device)
+        self.critic_target = copy.deepcopy(self.critic)
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
+
+    def _normalize(self, observations: torch.Tensor) -> torch.Tensor:
+        return (observations.float() - self.state_mean_tensor) / self.state_std_tensor
+
+    def eval_policy(self) -> nn.Module:
+        policy = NormalizedPolicy(self.actor, self.state_mean, self.state_std).to(self.device)
+        policy.eval()
+        return policy
+
+    def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Optional[float]]:
+        self.total_it += 1
+        observations = self._normalize(batch["observations"].to(self.device))
+        actions = batch["actions"].to(self.device).clamp(-self.max_action, self.max_action)
+        next_observations = self._normalize(batch["next_observations"].to(self.device))
+        rewards = batch["rewards"].to(self.device).unsqueeze(1)
+        dones = batch["terminals"].to(self.device).unsqueeze(1)
+        not_done = 1.0 - dones
+
+        with torch.no_grad():
+            noise = (torch.randn_like(actions) * self.policy_noise).clamp(-self.noise_clip, self.noise_clip)
+            next_actions = (self.actor_target(next_observations) + noise).clamp(-self.max_action, self.max_action)
+            target_q1, target_q2 = self.critic_target(next_observations, next_actions)
+            target_q = torch.min(target_q1, target_q2)
+            target_q = rewards + not_done * self.discount * target_q
+
+        current_q1, current_q2 = self.critic(observations, actions)
+        critic_loss = F.mse_loss(current_q1, target_q) + F.mse_loss(current_q2, target_q)
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+
+        actor_loss_value = None
+        bc_loss_value = None
+        q_mean = float(torch.min(current_q1, current_q2).mean().detach().cpu().item())
+        if self.total_it % self.policy_freq == 0:
+            pi = self.actor(observations)
+            q_pi = self.critic.q1_value(observations, pi)
+            lambda_coef = self.alpha / q_pi.abs().mean().detach().clamp(min=1e-6)
+            bc_loss = F.mse_loss(pi, actions)
+            actor_loss = -lambda_coef * q_pi.mean() + bc_loss
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
+
+            for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+                target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
+            for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+                target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
+
+            actor_loss_value = float(actor_loss.detach().cpu().item())
+            bc_loss_value = float(bc_loss.detach().cpu().item())
+
+        return {
+            "actor_loss": actor_loss_value,
+            "critic_loss": float(critic_loss.detach().cpu().item()),
+            "bc_loss": bc_loss_value,
+            "q_mean": q_mean,
+        }
 
 
 def run_td3bc_epoch(actor, critic, target_critic, actor_optimizer, critic_optimizer, loader, device: str, discount: float = 0.99):

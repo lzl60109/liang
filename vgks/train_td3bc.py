@@ -15,8 +15,8 @@ from vgks.envs import infer_env_dims, make_env, resolve_env_name
 from vgks.eval import evaluate_policy
 from vgks.train_vgks import infer_dims_from_dataset_source, load_config_file, merge_config_with_args
 from vgks.offline_rl import (
-    DeterministicActor,
-    TwinQ,
+    StableTD3BCTrainer,
+    compute_state_stats,
     format_eval_progress,
     format_train_progress,
     infinite_batches,
@@ -24,7 +24,6 @@ from vgks.offline_rl import (
     make_offline_loader,
     resolve_total_steps,
     save_training_outputs,
-    td3bc_train_step,
 )
 from vgks.experiment_logging import ExperimentLogger
 
@@ -50,6 +49,13 @@ def run_td3bc_training(
     wandb_name: str,
     eval_episodes: int = 10,
     num_workers: int = 0,
+    discount: float = 0.99,
+    tau: float = 0.005,
+    policy_noise: float = 0.2,
+    noise_clip: float = 0.5,
+    policy_freq: int = 2,
+    alpha: float = 2.5,
+    max_action: float = 1.0,
 ) -> Dict[str, Dict[str, float]]:
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -73,12 +79,22 @@ def run_td3bc_training(
         },
     )
 
-    actor = DeterministicActor(state_dim, action_dim, hidden_dim).to(device)
-    critic = TwinQ(state_dim, action_dim, hidden_dim).to(device)
-    target_critic = TwinQ(state_dim, action_dim, hidden_dim).to(device)
-    target_critic.load_state_dict(critic.state_dict())
-    actor_optimizer = torch.optim.Adam(actor.parameters(), lr=1e-3)
-    critic_optimizer = torch.optim.Adam(critic.parameters(), lr=1e-3)
+    state_stats = compute_state_stats(data)
+    trainer = StableTD3BCTrainer(
+        state_dim=state_dim,
+        action_dim=action_dim,
+        hidden_dim=hidden_dim,
+        max_action=max_action,
+        device=device,
+        state_mean=state_stats["state_mean"],
+        state_std=state_stats["state_std"],
+        discount=discount,
+        tau=tau,
+        policy_noise=policy_noise,
+        noise_clip=noise_clip,
+        policy_freq=policy_freq,
+        alpha=alpha,
+    )
 
     eval_env = make_eval_env(env_name, state_dim, action_dim)
     total_steps = resolve_total_steps(epochs, max_timesteps, loader)
@@ -86,20 +102,24 @@ def run_td3bc_training(
     eval_metrics = {}
     batch_iterator = infinite_batches(loader)
     for step in range(total_steps):
-        train_metrics = td3bc_train_step(
-            actor, critic, target_critic, actor_optimizer, critic_optimizer, next(batch_iterator), device
-        )
+        train_metrics = trainer.train_step(next(batch_iterator))
         if (step + 1) % max(1, log_every) == 0:
             logger.log_metrics({f"train/{k}": v for k, v in train_metrics.items()}, step=step + 1)
             print(format_train_progress("td3bc", step=step + 1, total_steps=total_steps, metrics=train_metrics), flush=True)
         if (step + 1) % max(1, eval_freq) == 0 or step == total_steps - 1:
-            eval_metrics = evaluate_policy(eval_env, actor, device=device, n_episodes=eval_episodes)
+            eval_metrics = evaluate_policy(eval_env, trainer.eval_policy(), device=device, n_episodes=eval_episodes)
             logger.log_metrics({f"eval/{k}": v for k, v in eval_metrics.items()}, step=step + 1)
             print(format_eval_progress("td3bc", step=step + 1, total_steps=total_steps, metrics=eval_metrics), flush=True)
 
     save_training_outputs(
         logger,
-        {"actor": actor.state_dict(), "critic": critic.state_dict(), "data_keys": list(data.keys())},
+        {
+            "actor": trainer.actor.state_dict(),
+            "critic": trainer.critic.state_dict(),
+            "state_mean": state_stats["state_mean"],
+            "state_std": state_stats["state_std"],
+            "data_keys": list(data.keys()),
+        },
         save_dir,
         eval_metrics,
     )
@@ -194,6 +214,13 @@ def main() -> None:
         wandb_name=merged["wandb_name"],
         eval_episodes=merged["eval_episodes"],
         num_workers=merged["num_workers"],
+        discount=merged.get("discount", 0.99),
+        tau=merged.get("tau", 0.005),
+        policy_noise=merged.get("policy_noise", 0.2),
+        noise_clip=merged.get("noise_clip", 0.5),
+        policy_freq=merged.get("policy_freq", 2),
+        alpha=merged.get("alpha", 2.5),
+        max_action=merged.get("max_action", 1.0),
     )
     print(json.dumps(metrics, indent=2))
 
