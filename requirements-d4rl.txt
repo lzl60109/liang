@@ -1,0 +1,5 @@
+gym==0.23.0
+mujoco==2.3.5
+mujoco-py==2.1.2.14
+Cython<3
+git+https://github.com/Farama-Foundation/D4RL.git

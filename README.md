@@ -6,6 +6,13 @@
 conda create -n vgks python=3.8
 conda activate vgks
 pip install -r requirements-gpu-cu121.txt
+pip install -r requirements-d4rl.txt
+```
+
+Check the runtime stack before training:
+
+```console
+python check_env.py --env-name halfcheetah-medium-v2
 ```
 
 ## Datasets
