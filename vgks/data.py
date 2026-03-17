@@ -53,12 +53,20 @@ def load_offline_dataset(source: Union[PathLike, ArrayDict]) -> ArrayDict:
         with np.load(source) as data:
             return {key: np.asarray(data[key], dtype=np.float32) for key in data.files}
 
+    if source.suffix == ".pkl":
+        with source.open("rb") as handle:
+            loaded = pickle.load(handle)
+        return {
+            key: None if value is None else np.asarray(value, dtype=np.float32)
+            for key, value in loaded.items()
+        }
+
     if source.suffix == ".pt":
         loaded = torch.load(source, map_location="cpu")
         return {key: np.asarray(value, dtype=np.float32) for key, value in loaded.items()}
 
     raise ValueError(
-        f"Unsupported dataset source '{source}'. Use a dict, .npz, or .pt file."
+        f"Unsupported dataset source '{source}'. Use a dict, directory with dataset.pkl, .pkl, .npz, or .pt file."
     )
 
 
