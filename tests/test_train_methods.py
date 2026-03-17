@@ -80,6 +80,33 @@ class MethodTrainingTests(unittest.TestCase):
             self.assertEqual(data["observations"].shape[0], 12)
             self.assertEqual(int((data["observations"] == 1.0).all(axis=1).sum()), 2)
 
+    def test_build_td3bc_dataset_drops_aug_only_extra_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            raw_path = tmpdir / "raw.npz"
+            aug_path = tmpdir / "aug.npz"
+            np.savez(
+                raw_path,
+                observations=np.zeros((10, 3), dtype=np.float32),
+                actions=np.zeros((10, 2), dtype=np.float32),
+                next_observations=np.zeros((10, 3), dtype=np.float32),
+                rewards=np.zeros(10, dtype=np.float32),
+                terminals=np.zeros(10, dtype=np.float32),
+            )
+            np.savez(
+                aug_path,
+                observations=np.ones((8, 3), dtype=np.float32),
+                actions=np.ones((8, 2), dtype=np.float32),
+                next_observations=np.ones((8, 3), dtype=np.float32),
+                rewards=np.ones(8, dtype=np.float32),
+                terminals=np.zeros(8, dtype=np.float32),
+                q_values=np.ones(8, dtype=np.float32),
+            )
+
+            data = build_td3bc_training_data(raw_dataset_path=raw_path, aug_dataset_path=aug_path, mix_aug_ratio=0.2, seed=0)
+
+            self.assertNotIn("q_values", data)
+
     def test_td3bc_config_includes_aug_mixture_fields(self):
         config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/td3bc.yaml").read_text(encoding="utf-8"))
 

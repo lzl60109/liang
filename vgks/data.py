@@ -62,6 +62,14 @@ class OfflineReplayDataset(Dataset):
         if missing:
             raise KeyError(f"Dataset is missing required keys: {sorted(missing)}")
         self.data = {key: np.asarray(value, dtype=np.float32) for key, value in data.items()}
+        reference_length = int(self.data["observations"].shape[0])
+        for key, value in self.data.items():
+            if value is None:
+                continue
+            if int(value.shape[0]) != reference_length:
+                raise ValueError(
+                    f"Dataset field '{key}' has length {value.shape[0]}, expected {reference_length} to match observations"
+                )
 
     def __len__(self) -> int:
         return int(self.data["observations"].shape[0])

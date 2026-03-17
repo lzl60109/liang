@@ -17,6 +17,8 @@ from vgks.experiment_logging import ExperimentLogger
 from vgks.models import ConservativeCritic
 from vgks.train_bc import ToyEvalEnv
 
+TD3BC_TRANSITION_KEYS = {"observations", "actions", "next_observations", "rewards", "terminals"}
+
 
 def _format_metric_items(metrics: Dict[str, float]) -> str:
     parts = []
@@ -193,16 +195,20 @@ def build_td3bc_training_data(
     seed: int = 0,
 ) -> Dict[str, np.ndarray]:
     if dataset_path is not None:
-        return ensure_rewards_and_terminals(load_training_dataset(dataset_path, env_name))
+        data = ensure_rewards_and_terminals(load_training_dataset(dataset_path, env_name))
+        return {key: value for key, value in data.items() if key in TD3BC_TRANSITION_KEYS}
 
     if raw_dataset_path is None:
-        return ensure_rewards_and_terminals(load_training_dataset(None, env_name))
+        data = ensure_rewards_and_terminals(load_training_dataset(None, env_name))
+        return {key: value for key, value in data.items() if key in TD3BC_TRANSITION_KEYS}
 
     raw_data = ensure_rewards_and_terminals(load_offline_dataset(raw_dataset_path))
+    raw_data = {key: value for key, value in raw_data.items() if key in TD3BC_TRANSITION_KEYS}
     if aug_dataset_path is None or mix_aug_ratio <= 0.0:
         return raw_data
 
     aug_data = ensure_rewards_and_terminals(load_offline_dataset(aug_dataset_path))
+    aug_data = {key: value for key, value in aug_data.items() if key in TD3BC_TRANSITION_KEYS}
     raw_size = int(raw_data["observations"].shape[0])
     aug_size = int(aug_data["observations"].shape[0])
     take = min(aug_size, int(round(raw_size * mix_aug_ratio)))
