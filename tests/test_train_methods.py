@@ -3,10 +3,13 @@ import unittest
 from pathlib import Path
 import subprocess
 import sys
+from contextlib import redirect_stdout
+from io import StringIO
 
 import numpy as np
 
 from vgks.generate_vgks import generate_augmented_dataset, save_generated_dataset
+from vgks.offline_rl import format_eval_progress, format_train_progress
 from vgks.train_cql import run_cql_training
 from vgks.train_iql import run_iql_training
 from vgks.train_kats import run_kats_training
@@ -16,6 +19,27 @@ from vgks.train_vgks import build_trainer_from_args
 
 
 class MethodTrainingTests(unittest.TestCase):
+    def test_format_train_progress_includes_step_and_losses(self):
+        line = format_train_progress("td3bc", step=1000, total_steps=5000, metrics={"actor_loss": 1.25, "critic_loss": 0.5})
+
+        self.assertIn("[Train][TD3BC]", line)
+        self.assertIn("step=1000/5000", line)
+        self.assertIn("actor_loss=1.2500", line)
+        self.assertIn("critic_loss=0.5000", line)
+
+    def test_format_eval_progress_includes_step_and_normalized_score(self):
+        line = format_eval_progress(
+            "td3bc",
+            step=5000,
+            total_steps=10000,
+            metrics={"return": 123.0, "normalized_score": 45.6},
+        )
+
+        self.assertIn("[Eval][TD3BC]", line)
+        self.assertIn("step=5000/10000", line)
+        self.assertIn("return=123.0000", line)
+        self.assertIn("normalized_score=45.6000", line)
+
     def test_offline_rl_cli_supports_max_timesteps_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
@@ -62,6 +86,126 @@ class MethodTrainingTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_run_td3bc_training_prints_progress(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            dataset_path = tmpdir / "dataset.npz"
+            np.savez(
+                dataset_path,
+                observations=np.random.randn(8, 3).astype(np.float32),
+                actions=np.random.randn(8, 2).astype(np.float32),
+                next_observations=np.random.randn(8, 3).astype(np.float32),
+                rewards=np.random.randn(8).astype(np.float32),
+                terminals=np.zeros(8, dtype=np.float32),
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                run_td3bc_training(
+                    dataset_path=dataset_path,
+                    env_name=None,
+                    state_dim=3,
+                    action_dim=2,
+                    hidden_dim=16,
+                    batch_size=4,
+                    max_timesteps=2,
+                    eval_freq=1,
+                    log_every=1,
+                    seed=0,
+                    device="cpu",
+                    save_dir=tmpdir / "runs" / "td3bc",
+                    use_wandb=False,
+                    wandb_project="vgks-tests",
+                    wandb_group="td3bc",
+                    wandb_name="print-td3bc",
+                    eval_episodes=2,
+                    num_workers=0,
+                )
+
+            output = stdout.getvalue()
+            self.assertIn("[Train][TD3BC]", output)
+            self.assertIn("[Eval][TD3BC]", output)
+
+    def test_run_iql_training_prints_progress(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            dataset_path = tmpdir / "dataset.npz"
+            np.savez(
+                dataset_path,
+                observations=np.random.randn(8, 3).astype(np.float32),
+                actions=np.random.randn(8, 2).astype(np.float32),
+                next_observations=np.random.randn(8, 3).astype(np.float32),
+                rewards=np.random.randn(8).astype(np.float32),
+                terminals=np.zeros(8, dtype=np.float32),
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                run_iql_training(
+                    dataset_path=dataset_path,
+                    env_name=None,
+                    state_dim=3,
+                    action_dim=2,
+                    hidden_dim=16,
+                    batch_size=4,
+                    max_timesteps=2,
+                    eval_freq=1,
+                    log_every=1,
+                    seed=0,
+                    device="cpu",
+                    save_dir=tmpdir / "runs" / "iql",
+                    use_wandb=False,
+                    wandb_project="vgks-tests",
+                    wandb_group="iql",
+                    wandb_name="print-iql",
+                    eval_episodes=2,
+                    num_workers=0,
+                )
+
+            output = stdout.getvalue()
+            self.assertIn("[Train][IQL]", output)
+            self.assertIn("[Eval][IQL]", output)
+
+    def test_run_cql_training_prints_progress(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            dataset_path = tmpdir / "dataset.npz"
+            np.savez(
+                dataset_path,
+                observations=np.random.randn(8, 3).astype(np.float32),
+                actions=np.random.randn(8, 2).astype(np.float32),
+                next_observations=np.random.randn(8, 3).astype(np.float32),
+                rewards=np.random.randn(8).astype(np.float32),
+                terminals=np.zeros(8, dtype=np.float32),
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                run_cql_training(
+                    dataset_path=dataset_path,
+                    env_name=None,
+                    state_dim=3,
+                    action_dim=2,
+                    hidden_dim=16,
+                    batch_size=4,
+                    max_timesteps=2,
+                    eval_freq=1,
+                    log_every=1,
+                    seed=0,
+                    device="cpu",
+                    save_dir=tmpdir / "runs" / "cql",
+                    use_wandb=False,
+                    wandb_project="vgks-tests",
+                    wandb_group="cql",
+                    wandb_name="print-cql",
+                    eval_episodes=2,
+                    num_workers=0,
+                )
+
+            output = stdout.getvalue()
+            self.assertIn("[Train][CQL]", output)
+            self.assertIn("[Eval][CQL]", output)
 
     def test_offline_rl_cli_accepts_config_without_save_dir_flag(self):
         with tempfile.TemporaryDirectory() as tmpdir:

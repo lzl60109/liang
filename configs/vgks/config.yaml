@@ -12,7 +12,7 @@ sigma_lr: 0.001
 device: cuda:0
 num_workers: 4
 seed: 0
-use_wandb: true
+use_wandb: false
 wandb_project: vgks-paper
 wandb_group: vgks-generate
 wandb_name: vgks-generate-halfcheetah-medium

@@ -18,6 +18,45 @@ from vgks.models import ConservativeCritic
 from vgks.train_bc import ToyEvalEnv
 
 
+def _format_metric_items(metrics: Dict[str, float]) -> str:
+    parts = []
+    preferred_order = [
+        "actor_loss",
+        "critic_loss",
+        "value_loss",
+        "cql_loss",
+        "raw_return",
+        "normalized_score",
+        "episodes",
+    ]
+    seen = set()
+    for key in preferred_order:
+        if key in metrics:
+            seen.add(key)
+            display_key = "return" if key == "raw_return" else key
+            value = metrics[key]
+            if isinstance(value, (int, float, np.floating, np.integer)):
+                parts.append(f"{display_key}={float(value):.4f}")
+            else:
+                parts.append(f"{display_key}={value}")
+    for key, value in metrics.items():
+        if key in seen:
+            continue
+        if isinstance(value, (int, float, np.floating, np.integer)):
+            parts.append(f"{key}={float(value):.4f}")
+        else:
+            parts.append(f"{key}={value}")
+    return " ".join(parts)
+
+
+def format_train_progress(method: str, *, step: int, total_steps: int, metrics: Dict[str, float]) -> str:
+    return f"[Train][{method.upper()}] step={step}/{total_steps} {_format_metric_items(metrics)}".strip()
+
+
+def format_eval_progress(method: str, *, step: int, total_steps: int, metrics: Dict[str, float]) -> str:
+    return f"[Eval][{method.upper()}] step={step}/{total_steps} {_format_metric_items(metrics)}".strip()
+
+
 class DeterministicActor(nn.Module):
     def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = 256) -> None:
         super().__init__()

@@ -8,6 +8,11 @@ from vgks.train_vgks import load_config_file, merge_config_with_args
 
 
 class VGKSConfigTests(unittest.TestCase):
+    def test_default_generation_config_disables_wandb(self):
+        config = load_config_file(Path("H:/codex_test/nips2026/configs/vgks/config.yaml"))
+
+        self.assertFalse(config["use_wandb"])
+
     def test_load_config_file_reads_yaml(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "vgks.yaml"

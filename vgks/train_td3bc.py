@@ -17,6 +17,8 @@ from vgks.train_vgks import infer_dims_from_dataset_source, load_config_file, me
 from vgks.offline_rl import (
     DeterministicActor,
     TwinQ,
+    format_eval_progress,
+    format_train_progress,
     infinite_batches,
     make_eval_env,
     make_offline_loader,
@@ -89,9 +91,11 @@ def run_td3bc_training(
         )
         if (step + 1) % max(1, log_every) == 0:
             logger.log_metrics({f"train/{k}": v for k, v in train_metrics.items()}, step=step + 1)
+            print(format_train_progress("td3bc", step=step + 1, total_steps=total_steps, metrics=train_metrics), flush=True)
         if (step + 1) % max(1, eval_freq) == 0 or step == total_steps - 1:
             eval_metrics = evaluate_policy(eval_env, actor, device=device, n_episodes=eval_episodes)
             logger.log_metrics({f"eval/{k}": v for k, v in eval_metrics.items()}, step=step + 1)
+            print(format_eval_progress("td3bc", step=step + 1, total_steps=total_steps, metrics=eval_metrics), flush=True)
 
     save_training_outputs(
         logger,
