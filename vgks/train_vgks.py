@@ -43,6 +43,15 @@ def load_config_file(config_path: Path) -> Dict[str, object]:
     return data
 
 
+def infer_dims_from_dataset_source(dataset_path: Path) -> Dict[str, int]:
+    data = load_offline_dataset(dataset_path)
+    observations = np.asarray(data["observations"])
+    actions = np.asarray(data["actions"])
+    state_dim = int(observations.shape[-1]) if observations.ndim > 1 else 1
+    action_dim = int(actions.shape[-1]) if actions.ndim > 1 else 1
+    return {"state_dim": state_dim, "action_dim": action_dim}
+
+
 def merge_config_with_args(config: Dict[str, object], arg_values: Dict[str, object]) -> Dict[str, object]:
     merged = dict(config)
     for key, value in arg_values.items():
@@ -366,8 +375,13 @@ def main() -> None:
     merged = merge_config_with_args(config, vars(args))
 
     resolved_env_name = resolve_env_name(merged.get("env_name"), merged.get("task"), merged.get("dataset_name"))
+    dataset_path = Path(merged["dataset_path"]) if merged.get("dataset_path") else None
     state_dim = merged.get("state_dim")
     action_dim = merged.get("action_dim")
+    if dataset_path is not None and (state_dim is None or action_dim is None):
+        dims = infer_dims_from_dataset_source(dataset_path)
+        state_dim = dims["state_dim"]
+        action_dim = dims["action_dim"]
     if resolved_env_name is not None and (state_dim is None or action_dim is None):
         dims = infer_env_dims(make_env(resolved_env_name))
         state_dim = dims["state_dim"]
@@ -393,7 +407,7 @@ def main() -> None:
     )
     metrics = run_training(
         trainer=trainer,
-        dataset_path=Path(merged["dataset_path"]) if merged.get("dataset_path") else None,
+        dataset_path=dataset_path,
         env_name=resolved_env_name,
         batch_size=merged["batch_size"],
         epochs=merged["epochs"],

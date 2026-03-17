@@ -8,10 +8,29 @@ import numpy as np
 import torch
 
 from vgks.data import OfflineReplayDataset, build_dataloader, load_offline_dataset
-from vgks.train_vgks import build_trainer_from_args, run_training
+from vgks.train_vgks import build_trainer_from_args, infer_dims_from_dataset_source, run_training
 
 
 class TrainingEntryTests(unittest.TestCase):
+    def test_infer_dims_from_dataset_source(self):
+        observations = np.random.randn(8, 3).astype(np.float32)
+        actions = np.random.randn(8, 2).astype(np.float32)
+        next_observations = np.random.randn(8, 3).astype(np.float32)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dataset_path = Path(tmpdir) / "dataset.npz"
+            np.savez(
+                dataset_path,
+                observations=observations,
+                actions=actions,
+                next_observations=next_observations,
+            )
+
+            dims = infer_dims_from_dataset_source(dataset_path)
+
+        self.assertEqual(dims["state_dim"], 3)
+        self.assertEqual(dims["action_dim"], 2)
+
     def test_inner_train_vgks_script_runs_from_package_directory(self):
         repo_root = Path("H:/codex_test/nips2026")
         result = subprocess.run(
