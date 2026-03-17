@@ -1,6 +1,8 @@
 import tempfile
 import unittest
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import torch
@@ -10,6 +12,18 @@ from vgks.train_vgks import build_trainer_from_args, run_training
 
 
 class TrainingEntryTests(unittest.TestCase):
+    def test_inner_train_vgks_script_runs_from_package_directory(self):
+        repo_root = Path("H:/codex_test/nips2026")
+        result = subprocess.run(
+            [sys.executable, "train_vgks.py", "--help"],
+            cwd=repo_root / "vgks",
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Value-Guided Koopman Symmetry", result.stdout)
+
     def test_load_offline_dataset_from_npz(self):
         data = {
             "observations": np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -8,6 +9,9 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from vgks.cli import build_parser
 from vgks.data import OfflineReplayDataset, build_dataloader, load_d4rl_dataset, load_offline_dataset
