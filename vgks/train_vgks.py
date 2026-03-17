@@ -14,7 +14,7 @@ from vgks.envs import infer_env_dims, make_env, resolve_env_name
 from vgks.eval import evaluate_policy
 from vgks.export import export_augmented_dataset
 from vgks.integration import load_kats_checkpoint, load_tgcvg_critic_checkpoint
-from vgks.logging import ExperimentLogger
+from vgks.experiment_logging import ExperimentLogger
 from vgks.models import ConservativeCritic, KoopmanDynamicsModel, SigmaModel
 from vgks.train_bc import BCPolicy, ToyEvalEnv, train_bc_epoch
 from vgks.trainer import ValueGuidedKoopmanTrainer

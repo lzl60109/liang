@@ -12,7 +12,7 @@ from vgks.data import OfflineReplayDataset, build_dataloader, load_d4rl_dataset,
 from vgks.envs import infer_env_dims, make_env, resolve_env_name
 from vgks.eval import evaluate_policy
 from vgks.export import export_augmented_dataset
-from vgks.logging import ExperimentLogger
+from vgks.experiment_logging import ExperimentLogger
 from vgks.models import ConservativeCritic
 from vgks.train_bc import BCPolicy, ToyEvalEnv, train_bc_epoch
 

@@ -13,7 +13,7 @@ from vgks.cli import build_parser
 from vgks.data import OfflineReplayDataset, build_dataloader, load_d4rl_dataset, load_offline_dataset
 from vgks.envs import infer_env_dims, make_env, resolve_env_name
 from vgks.eval import evaluate_policy
-from vgks.logging import ExperimentLogger
+from vgks.experiment_logging import ExperimentLogger
 
 
 class BCPolicy(nn.Module):

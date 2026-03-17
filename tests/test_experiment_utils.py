@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,7 +11,7 @@ from torch import nn
 
 from vgks.eval import evaluate_policy
 from vgks.export import export_augmented_dataset
-from vgks.logging import ExperimentLogger
+from vgks.experiment_logging import ExperimentLogger
 from vgks.envs import resolve_env_name
 
 
@@ -45,6 +47,22 @@ class ConstantPolicy(nn.Module):
 
 
 class ExperimentUtilsTests(unittest.TestCase):
+    def test_python_from_vgks_directory_still_imports_stdlib_logging(self):
+        repo_root = Path("H:/codex_test/nips2026")
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import logging; print(hasattr(logging, 'getLogger'))",
+            ],
+            cwd=repo_root / "vgks",
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout.strip(), "True")
+
     def test_evaluate_policy_returns_normalized_score(self):
         env = FakeEnv()
         policy = ConstantPolicy()

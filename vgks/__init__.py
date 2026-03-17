@@ -12,7 +12,7 @@ from vgks.eval import evaluate_policy
 from vgks.export import export_augmented_dataset
 from vgks.models import ConservativeCritic, InverseDynamicsModel, KoopmanDynamicsModel, SigmaModel
 from vgks.integration import load_kats_checkpoint, load_tgcvg_critic_checkpoint
-from vgks.logging import ExperimentLogger
+from vgks.experiment_logging import ExperimentLogger
 from vgks.train_bc import run_bc_training
 from vgks.train_kats import run_kats_training
 from vgks.train_tgcvg import run_tgcvg_training
