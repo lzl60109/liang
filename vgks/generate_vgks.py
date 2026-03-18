@@ -67,20 +67,9 @@ def generate_augmented_dataset(
         trainer.train_sigma_epoch(train_loader)
 
     augmented_batches = []
-    offset = 0
     for batch in eval_loader:
         augmented = trainer.augment_batch(batch)
-        batch_size_now = augmented["observations"].shape[0]
-        if "rewards" in data and data["rewards"] is not None:
-            augmented["rewards"] = torch.tensor(
-                data["rewards"][offset : offset + batch_size_now], dtype=torch.float32
-            )
-        if "terminals" in data and data["terminals"] is not None:
-            augmented["terminals"] = torch.tensor(
-                data["terminals"][offset : offset + batch_size_now], dtype=torch.float32
-            )
         augmented_batches.append(augmented)
-        offset += batch_size_now
 
     return _concat_batches(augmented_batches)
 

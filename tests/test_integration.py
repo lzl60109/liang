@@ -4,7 +4,13 @@ from pathlib import Path
 
 import torch
 
-from vgks import ConservativeCritic, KoopmanDynamicsModel, SigmaModel, ValueGuidedKoopmanTrainer
+from vgks import (
+    ConservativeCritic,
+    InverseDynamicsModel,
+    KoopmanDynamicsModel,
+    SigmaModel,
+    ValueGuidedKoopmanTrainer,
+)
 from vgks.integration import load_kats_checkpoint, load_tgcvg_critic_checkpoint
 
 
@@ -50,6 +56,20 @@ class IntegrationTests(unittest.TestCase):
 
         self.assertTrue(torch.allclose(critic.q1_net.network[0].weight, q1_state["network.0.weight"]))
         self.assertTrue(torch.allclose(critic.q2_net.network[0].weight, q2_state["network.0.weight"]))
+
+    def test_load_kats_checkpoint_can_restore_inverse_model(self):
+        dynamics = KoopmanDynamicsModel(state_dim=3, action_dim=2, latent_dim=4, hidden_dim=6)
+        inverse_model = InverseDynamicsModel(latent_dim=4, action_dim=2, hidden_dim=6)
+        dynamics_state = {key: torch.full_like(value, 0.33) for key, value in dynamics.state_dict().items()}
+        inverse_state = {key: torch.full_like(value, -0.44) for key, value in inverse_model.state_dict().items()}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "kats_full.pt"
+            torch.save({"dynamics": dynamics_state, "inverse_model": inverse_state}, path)
+            load_kats_checkpoint(dynamics, path, inverse_model=inverse_model)
+
+        self.assertTrue(torch.allclose(dynamics.layer1.weight, dynamics_state["layer1.weight"]))
+        self.assertTrue(torch.allclose(inverse_model.fc1.weight, inverse_state["fc1.weight"]))
 
     def test_train_sigma_epoch_returns_averaged_metrics(self):
         torch.manual_seed(0)

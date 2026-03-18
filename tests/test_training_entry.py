@@ -63,6 +63,53 @@ class TrainingEntryTests(unittest.TestCase):
             self.assertTrue((save_prefix.with_suffix(".npy")).exists())
             self.assertTrue((tmpdir / "aug" / "toy-env.npz").exists())
 
+    def test_generate_vgks_stage_does_not_copy_rewards_or_terminals_to_augmented_data(self):
+        observations = np.random.randn(8, 3).astype(np.float32)
+        actions = np.random.randn(8, 2).astype(np.float32)
+        next_observations = np.random.randn(8, 3).astype(np.float32)
+        rewards = np.random.randn(8).astype(np.float32)
+        terminals = np.zeros(8, dtype=np.float32)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dataset_path = Path(tmpdir) / "dataset.npz"
+            np.savez(
+                dataset_path,
+                observations=observations,
+                actions=actions,
+                next_observations=next_observations,
+                rewards=rewards,
+                terminals=terminals,
+            )
+
+            trainer = build_trainer_from_args(
+                state_dim=3,
+                action_dim=2,
+                latent_dim=4,
+                hidden_dim=8,
+                lambda_q=0.1,
+                lambda_state_anchor=1.0,
+                lambda_latent_anchor=0.1,
+                q_clip_min=-20.0,
+                q_clip_max=20.0,
+                sigma_warmup_steps=0,
+                sigma_lr=1e-2,
+                kats_checkpoint=None,
+                critic_checkpoint=None,
+                device="cpu",
+            )
+
+            augmented = generate_augmented_dataset(
+                trainer=trainer,
+                dataset_path=dataset_path,
+                env_name=None,
+                batch_size=4,
+                epochs=1,
+                num_workers=0,
+            )
+
+        self.assertNotIn("rewards", augmented)
+        self.assertNotIn("terminals", augmented)
+
     def test_infer_dims_from_dataset_source(self):
         observations = np.random.randn(8, 3).astype(np.float32)
         actions = np.random.randn(8, 2).astype(np.float32)

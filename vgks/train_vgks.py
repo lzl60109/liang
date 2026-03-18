@@ -19,7 +19,7 @@ from vgks.eval import evaluate_policy
 from vgks.export import export_augmented_dataset
 from vgks.integration import load_kats_checkpoint, load_tgcvg_critic_checkpoint
 from vgks.experiment_logging import ExperimentLogger
-from vgks.models import ConservativeCritic, KoopmanDynamicsModel, SigmaModel
+from vgks.models import ConservativeCritic, InverseDynamicsModel, KoopmanDynamicsModel, SigmaModel
 from vgks.train_bc import BCPolicy, ToyEvalEnv, train_bc_epoch
 from vgks.trainer import ValueGuidedKoopmanTrainer
 
@@ -83,6 +83,11 @@ def build_trainer_from_args(
         latent_dim=latent_dim,
         hidden_dim=hidden_dim,
     )
+    inverse_model = InverseDynamicsModel(
+        latent_dim=latent_dim,
+        action_dim=action_dim,
+        hidden_dim=max(8, latent_dim * 2),
+    )
     sigma_model = SigmaModel(latent_dim=latent_dim)
     critic = ConservativeCritic(
         state_dim=state_dim,
@@ -91,7 +96,7 @@ def build_trainer_from_args(
     )
 
     if kats_checkpoint:
-        load_kats_checkpoint(dynamics, kats_checkpoint)
+        load_kats_checkpoint(dynamics, kats_checkpoint, inverse_model=inverse_model)
     if critic_checkpoint:
         load_tgcvg_critic_checkpoint(critic, critic_checkpoint)
 
@@ -99,6 +104,7 @@ def build_trainer_from_args(
         dynamics=dynamics,
         sigma_model=sigma_model,
         critic=critic,
+        inverse_model=inverse_model,
         action_dim=action_dim,
         lambda_q=lambda_q,
         lambda_state_anchor=lambda_state_anchor,
