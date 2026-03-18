@@ -11,6 +11,7 @@ class ExperimentLogger:
         *,
         save_dir: Path,
         use_wandb: bool,
+        wandb_mode: str = "online",
         project: str,
         group: str,
         name: str,
@@ -35,6 +36,7 @@ class ExperimentLogger:
                     name=name,
                     config=config,
                     dir=str(self.save_dir),
+                    mode=wandb_mode,
                 )
             except Exception:
                 self._wandb_run = None

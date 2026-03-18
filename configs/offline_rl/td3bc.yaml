@@ -22,6 +22,7 @@ seed: 0
 device: cuda:0
 save_dir: runs/td3bc/halfcheetah-medium-v2/seed_0
 use_wandb: false
+wandb_mode: offline
 wandb_project: vgks-paper
 wandb_group: td3bc
 wandb_name: td3bc-halfcheetah-medium-seed0

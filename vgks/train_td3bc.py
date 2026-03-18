@@ -47,6 +47,7 @@ def run_td3bc_training(
     device: str,
     save_dir: Path,
     use_wandb: bool,
+    wandb_mode: str = "online",
     wandb_project: str,
     wandb_group: str,
     wandb_name: str,
@@ -76,6 +77,7 @@ def run_td3bc_training(
     logger = ExperimentLogger(
         save_dir=save_dir,
         use_wandb=use_wandb,
+        wandb_mode=wandb_mode,
         project=wandb_project,
         group=wandb_group,
         name=wandb_name,
@@ -161,6 +163,7 @@ def main() -> None:
     parser.add_argument("--device", dest="device", type=str, default="cpu")
     parser.add_argument("--save-dir", dest="save_dir", type=str, default=None)
     parser.add_argument("--use-wandb", dest="use_wandb", action="store_true")
+    parser.add_argument("--wandb-mode", dest="wandb_mode", type=str, default=None)
     parser.add_argument("--wandb-project", dest="wandb_project", type=str, default="vgks")
     parser.add_argument("--wandb-group", dest="wandb_group", type=str, default="td3bc")
     parser.add_argument("--wandb-name", dest="wandb_name", type=str, default="td3bc-run")
@@ -186,6 +189,7 @@ def main() -> None:
         device=None,
         save_dir=None,
         use_wandb=None,
+        wandb_mode=None,
         wandb_project=None,
         wandb_group=None,
         wandb_name=None,
@@ -234,6 +238,7 @@ def main() -> None:
         device=merged["device"],
         save_dir=Path(merged["save_dir"]),
         use_wandb=bool(merged["use_wandb"]),
+        wandb_mode=merged.get("wandb_mode", "online"),
         wandb_project=merged["wandb_project"],
         wandb_group=merged["wandb_group"],
         wandb_name=merged["wandb_name"],

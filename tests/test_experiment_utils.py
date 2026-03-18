@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import torch
@@ -47,6 +48,27 @@ class ConstantPolicy(nn.Module):
 
 
 class ExperimentUtilsTests(unittest.TestCase):
+    def test_logger_passes_wandb_mode_to_init(self):
+        fake_wandb = mock.Mock()
+        fake_run = mock.Mock()
+        fake_wandb.init.return_value = fake_run
+
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict(sys.modules, {"wandb": fake_wandb}):
+            run_dir = Path(tmpdir)
+            logger = ExperimentLogger(
+                save_dir=run_dir,
+                use_wandb=True,
+                wandb_mode="offline",
+                project="vgks-tests",
+                group="td3bc",
+                name="offline-run",
+                config={"seed": 0},
+            )
+            logger.finish()
+
+        fake_wandb.init.assert_called_once()
+        self.assertEqual(fake_wandb.init.call_args[1]["mode"], "offline")
+
     def test_python_from_vgks_directory_still_imports_stdlib_logging(self):
         repo_root = Path("H:/codex_test/nips2026")
         result = subprocess.run(
