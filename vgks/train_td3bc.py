@@ -21,6 +21,7 @@ from vgks.offline_rl import (
     format_train_progress,
     infinite_batches,
     make_eval_env,
+    make_td3bc_dual_loaders,
     make_td3bc_loader,
     resolve_total_steps,
     save_training_outputs,
@@ -64,16 +65,34 @@ def run_td3bc_training(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    data, loader = make_td3bc_loader(
-        dataset_path=dataset_path,
-        raw_dataset_path=raw_dataset_path,
-        aug_dataset_path=aug_dataset_path,
-        env_name=env_name,
-        mix_aug_ratio=mix_aug_ratio,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        seed=seed,
-    )
+    use_dual_loaders = raw_dataset_path is not None and aug_dataset_path is not None and mix_aug_ratio > 0.0
+    if use_dual_loaders:
+        sources, critic_loader, actor_loader = make_td3bc_dual_loaders(
+            dataset_path=dataset_path,
+            raw_dataset_path=raw_dataset_path,
+            aug_dataset_path=aug_dataset_path,
+            env_name=env_name,
+            mix_aug_ratio=mix_aug_ratio,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            seed=seed,
+        )
+        data = sources["actor_data"]
+        critic_data = sources["critic_data"]
+        loader = actor_loader
+    else:
+        data, loader = make_td3bc_loader(
+            dataset_path=dataset_path,
+            raw_dataset_path=raw_dataset_path,
+            aug_dataset_path=aug_dataset_path,
+            env_name=env_name,
+            mix_aug_ratio=mix_aug_ratio,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            seed=seed,
+        )
+        critic_loader = loader
+        critic_data = data
     logger = ExperimentLogger(
         save_dir=save_dir,
         use_wandb=use_wandb,
@@ -91,10 +110,11 @@ def run_td3bc_training(
             "seed": seed,
             "device": device,
             "mix_aug_ratio": mix_aug_ratio,
+            "critic_source": "raw_only" if use_dual_loaders else "shared_loader",
         },
     )
 
-    state_stats = compute_state_stats(data)
+    state_stats = compute_state_stats(critic_data)
     trainer = StableTD3BCTrainer(
         state_dim=state_dim,
         action_dim=action_dim,
@@ -115,9 +135,22 @@ def run_td3bc_training(
     total_steps = resolve_total_steps(epochs, max_timesteps, loader)
     train_metrics = {}
     eval_metrics = {}
-    batch_iterator = infinite_batches(loader)
+    critic_iterator = infinite_batches(critic_loader)
+    actor_iterator = infinite_batches(loader)
     for step in range(total_steps):
-        train_metrics = trainer.train_step(next(batch_iterator))
+        trainer.total_it += 1
+        critic_metrics = trainer.train_critic_step(next(critic_iterator))
+        train_metrics = {
+            "actor_loss": None,
+            "critic_loss": critic_metrics["critic_loss"],
+            "bc_loss": None,
+            "q_mean": critic_metrics["q_mean"],
+        }
+        if trainer.total_it % trainer.policy_freq == 0:
+            actor_metrics = trainer.train_actor_step(next(actor_iterator))
+            train_metrics["actor_loss"] = actor_metrics["actor_loss"]
+            train_metrics["bc_loss"] = actor_metrics["bc_loss"]
+            train_metrics["q_mean"] = actor_metrics["q_mean"]
         if (step + 1) % max(1, log_every) == 0:
             logger.log_metrics({f"train/{k}": v for k, v in train_metrics.items()}, step=step + 1)
             print(format_train_progress("td3bc", step=step + 1, total_steps=total_steps, metrics=train_metrics), flush=True)

@@ -80,6 +80,13 @@ python train_td3bc.py ^
   --save-dir runs/td3bc/halfcheetah-medium-v2/ratio_0p1
 ```
 
+TD3+BC uses a split training scheme in mixed mode:
+
+- critic updates read only the raw dataset
+- actor and BC updates read the raw-plus-augmented mixture
+
+This keeps Bellman regression on grounded transitions while still letting the policy imitate filtered synthetic behavior.
+
 Each training script writes `eval.json` with the normalized D4RL score and a checkpoint under the configured `save_dir`.
 
 ## Recommended Debugging Workflow

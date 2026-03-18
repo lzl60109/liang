@@ -14,6 +14,7 @@ import yaml
 from vgks.offline_rl import (
     StableTD3BCTrainer,
     build_td3bc_training_data,
+    build_td3bc_training_sources,
     format_eval_progress,
     format_train_progress,
 )
@@ -107,6 +108,39 @@ class MethodTrainingTests(unittest.TestCase):
 
             self.assertNotIn("q_values", data)
 
+    def test_build_td3bc_training_sources_keeps_raw_critic_data_and_mixed_actor_data(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            raw_path = tmpdir / "raw.npz"
+            aug_path = tmpdir / "aug.npz"
+            np.savez(
+                raw_path,
+                observations=np.zeros((10, 3), dtype=np.float32),
+                actions=np.zeros((10, 2), dtype=np.float32),
+                next_observations=np.zeros((10, 3), dtype=np.float32),
+                rewards=np.arange(10, dtype=np.float32),
+                terminals=np.zeros(10, dtype=np.float32),
+            )
+            np.savez(
+                aug_path,
+                observations=np.ones((8, 3), dtype=np.float32),
+                actions=np.ones((8, 2), dtype=np.float32),
+                next_observations=np.ones((8, 3), dtype=np.float32),
+                q_values=np.full(8, 5.0, dtype=np.float32),
+            )
+
+            sources = build_td3bc_training_sources(
+                raw_dataset_path=raw_path,
+                aug_dataset_path=aug_path,
+                mix_aug_ratio=0.2,
+                seed=0,
+            )
+
+            self.assertEqual(sources["critic_data"]["observations"].shape[0], 10)
+            self.assertEqual(sources["actor_data"]["observations"].shape[0], 12)
+            self.assertTrue(np.allclose(sources["critic_data"]["observations"], 0.0))
+            self.assertEqual(int((sources["actor_data"]["observations"] == 1.0).all(axis=1).sum()), 2)
+
     def test_td3bc_config_includes_aug_mixture_fields(self):
         config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/td3bc.yaml").read_text(encoding="utf-8"))
 
@@ -161,6 +195,55 @@ class MethodTrainingTests(unittest.TestCase):
 
             self.assertIn("normalized_score", metrics["eval"])
 
+    def test_dual_loader_td3bc_uses_raw_state_stats_for_normalization(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            raw_path = tmpdir / "raw.npz"
+            aug_path = tmpdir / "aug.npz"
+            np.savez(
+                raw_path,
+                observations=np.zeros((24, 3), dtype=np.float32),
+                actions=np.random.uniform(-1.0, 1.0, size=(24, 2)).astype(np.float32),
+                next_observations=np.zeros((24, 3), dtype=np.float32),
+                rewards=np.random.randn(24).astype(np.float32),
+                terminals=np.zeros(24, dtype=np.float32),
+            )
+            np.savez(
+                aug_path,
+                observations=np.full((12, 3), 10.0, dtype=np.float32),
+                actions=np.random.uniform(-1.0, 1.0, size=(12, 2)).astype(np.float32),
+                next_observations=np.full((12, 3), 10.0, dtype=np.float32),
+                q_values=np.full(12, 5.0, dtype=np.float32),
+            )
+
+            run_dir = tmpdir / "runs" / "td3bc_mix"
+            run_td3bc_training(
+                dataset_path=None,
+                raw_dataset_path=raw_path,
+                aug_dataset_path=aug_path,
+                mix_aug_ratio=0.25,
+                env_name=None,
+                state_dim=3,
+                action_dim=2,
+                hidden_dim=16,
+                batch_size=8,
+                max_timesteps=4,
+                eval_freq=4,
+                log_every=4,
+                seed=0,
+                device="cpu",
+                save_dir=run_dir,
+                use_wandb=False,
+                wandb_project="vgks-tests",
+                wandb_group="td3bc",
+                wandb_name="mix-td3bc-raw-stats",
+                eval_episodes=2,
+                num_workers=0,
+            )
+            saved = __import__("torch").load(run_dir / "checkpoint.pt", map_location="cpu")
+
+            self.assertTrue(np.allclose(saved["state_mean"], np.zeros(3, dtype=np.float32)))
+
     def test_stable_td3bc_train_step_uses_policy_delay(self):
         trainer = StableTD3BCTrainer(
             state_dim=3,
@@ -185,6 +268,40 @@ class MethodTrainingTests(unittest.TestCase):
         self.assertIn("q_mean", step1)
         self.assertIsNone(step1["actor_loss"])
         self.assertIsNotNone(step2["actor_loss"])
+
+    def test_stable_td3bc_actor_step_can_use_different_batch_from_critic_step(self):
+        import torch
+
+        trainer = StableTD3BCTrainer(
+            state_dim=3,
+            action_dim=2,
+            hidden_dim=16,
+            max_action=1.0,
+            device="cpu",
+            policy_freq=1,
+        )
+        raw_batch = {
+            "observations": torch.zeros(4, 3),
+            "actions": torch.zeros(4, 2),
+            "next_observations": torch.zeros(4, 3),
+            "rewards": torch.ones(4),
+            "terminals": torch.zeros(4),
+        }
+        actor_batch = {
+            "observations": torch.ones(4, 3),
+            "actions": torch.ones(4, 2).clamp(-1.0, 1.0),
+            "next_observations": torch.ones(4, 3),
+            "rewards": torch.zeros(4),
+            "terminals": torch.zeros(4),
+        }
+
+        trainer.train_critic_step(raw_batch)
+        metrics = trainer.train_actor_step(actor_batch)
+
+        self.assertIn("actor_loss", metrics)
+        self.assertIn("bc_loss", metrics)
+        self.assertIn("q_mean", metrics)
+        self.assertIsNotNone(metrics["actor_loss"])
 
     def test_td3bc_config_includes_stability_hyperparameters(self):
         config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/td3bc.yaml").read_text(encoding="utf-8"))

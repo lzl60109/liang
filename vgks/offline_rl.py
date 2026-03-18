@@ -224,6 +224,34 @@ def build_td3bc_training_data(
     return _concat_array_dicts(raw_data, aug_subset)
 
 
+def build_td3bc_training_sources(
+    *,
+    dataset_path: Optional[Path] = None,
+    raw_dataset_path: Optional[Path] = None,
+    aug_dataset_path: Optional[Path] = None,
+    env_name: Optional[str] = None,
+    mix_aug_ratio: float = 0.0,
+    seed: int = 0,
+) -> Dict[str, Dict[str, np.ndarray]]:
+    critic_data = build_td3bc_training_data(
+        dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=None,
+        env_name=env_name,
+        mix_aug_ratio=0.0,
+        seed=seed,
+    )
+    actor_data = build_td3bc_training_data(
+        dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=aug_dataset_path,
+        env_name=env_name,
+        mix_aug_ratio=mix_aug_ratio,
+        seed=seed,
+    )
+    return {"critic_data": critic_data, "actor_data": actor_data}
+
+
 def make_td3bc_loader(
     *,
     dataset_path: Optional[Path],
@@ -246,6 +274,32 @@ def make_td3bc_loader(
     dataset = OfflineReplayDataset(data)
     loader = build_dataloader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     return data, loader
+
+
+def make_td3bc_dual_loaders(
+    *,
+    dataset_path: Optional[Path],
+    raw_dataset_path: Optional[Path],
+    aug_dataset_path: Optional[Path],
+    env_name: Optional[str],
+    mix_aug_ratio: float,
+    batch_size: int,
+    num_workers: int,
+    seed: int,
+):
+    sources = build_td3bc_training_sources(
+        dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=aug_dataset_path,
+        env_name=env_name,
+        mix_aug_ratio=mix_aug_ratio,
+        seed=seed,
+    )
+    critic_dataset = OfflineReplayDataset(sources["critic_data"])
+    actor_dataset = OfflineReplayDataset(sources["actor_data"])
+    critic_loader = build_dataloader(critic_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    actor_loader = build_dataloader(actor_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    return sources, critic_loader, actor_loader
 
 
 def infinite_batches(loader):
@@ -323,8 +377,11 @@ class StableTD3BCTrainer:
         policy.eval()
         return policy
 
-    def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Optional[float]]:
-        self.total_it += 1
+    def _compute_q_mean(self, observations: torch.Tensor, actions: torch.Tensor) -> float:
+        current_q1, current_q2 = self.critic(observations, actions)
+        return float(torch.min(current_q1, current_q2).mean().detach().cpu().item())
+
+    def train_critic_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
         observations = self._normalize(batch["observations"].to(self.device))
         actions = batch["actions"].to(self.device).clamp(-self.max_action, self.max_action)
         next_observations = self._normalize(batch["next_observations"].to(self.device))
@@ -344,31 +401,49 @@ class StableTD3BCTrainer:
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
+        return {
+            "critic_loss": float(critic_loss.detach().cpu().item()),
+            "q_mean": self._compute_q_mean(observations, actions),
+        }
 
+    def train_actor_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Optional[float]]:
+        observations = self._normalize(batch["observations"].to(self.device))
+        actions = batch["actions"].to(self.device).clamp(-self.max_action, self.max_action)
+        pi = self.actor(observations)
+        q_pi = self.critic.q1_value(observations, pi)
+        lambda_coef = self.alpha / q_pi.abs().mean().detach().clamp(min=1e-6)
+        bc_loss = F.mse_loss(pi, actions)
+        actor_loss = -lambda_coef * q_pi.mean() + bc_loss
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+
+        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+            target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
+        for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+            target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
+
+        return {
+            "actor_loss": float(actor_loss.detach().cpu().item()),
+            "bc_loss": float(bc_loss.detach().cpu().item()),
+            "q_mean": self._compute_q_mean(observations, actions),
+        }
+
+    def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Optional[float]]:
+        self.total_it += 1
+        critic_metrics = self.train_critic_step(batch)
         actor_loss_value = None
         bc_loss_value = None
-        q_mean = float(torch.min(current_q1, current_q2).mean().detach().cpu().item())
+        q_mean = critic_metrics["q_mean"]
         if self.total_it % self.policy_freq == 0:
-            pi = self.actor(observations)
-            q_pi = self.critic.q1_value(observations, pi)
-            lambda_coef = self.alpha / q_pi.abs().mean().detach().clamp(min=1e-6)
-            bc_loss = F.mse_loss(pi, actions)
-            actor_loss = -lambda_coef * q_pi.mean() + bc_loss
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            self.actor_optimizer.step()
-
-            for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
-                target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
-            for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
-                target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
-
-            actor_loss_value = float(actor_loss.detach().cpu().item())
-            bc_loss_value = float(bc_loss.detach().cpu().item())
+            actor_metrics = self.train_actor_step(batch)
+            actor_loss_value = actor_metrics["actor_loss"]
+            bc_loss_value = actor_metrics["bc_loss"]
+            q_mean = actor_metrics["q_mean"]
 
         return {
             "actor_loss": actor_loss_value,
-            "critic_loss": float(critic_loss.detach().cpu().item()),
+            "critic_loss": critic_metrics["critic_loss"],
             "bc_loss": bc_loss_value,
             "q_mean": q_mean,
         }
