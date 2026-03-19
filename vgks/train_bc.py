@@ -79,9 +79,48 @@ def _make_eval_env(env_name: Optional[str], state_dim: int, action_dim: int):
     return make_env(env_name)
 
 
+def build_bc_training_data(
+    *,
+    dataset_path: Optional[Path] = None,
+    raw_dataset_path: Optional[Path] = None,
+    aug_dataset_path: Optional[Path] = None,
+    env_name: Optional[str] = None,
+    mix_aug_ratio: float = 0.0,
+    seed: int = 0,
+) -> Dict[str, np.ndarray]:
+    if dataset_path is not None:
+        return load_offline_dataset(dataset_path)
+
+    if raw_dataset_path is None:
+        return load_d4rl_dataset(env_name)
+
+    raw_data = load_offline_dataset(raw_dataset_path)
+    if aug_dataset_path is None or mix_aug_ratio <= 0.0:
+        return raw_data
+
+    aug_data = load_offline_dataset(aug_dataset_path)
+    raw_size = int(raw_data["observations"].shape[0])
+    aug_size = int(aug_data["observations"].shape[0])
+    take = min(aug_size, int(round(raw_size * mix_aug_ratio)))
+    if take <= 0:
+        return raw_data
+
+    rng = np.random.default_rng(seed)
+    indices = rng.choice(aug_size, size=take, replace=False)
+    mixed = {}
+    for key in ("observations", "actions", "next_observations"):
+        left = np.asarray(raw_data[key], dtype=np.float32)
+        right = np.asarray(aug_data[key], dtype=np.float32)[indices]
+        mixed[key] = np.concatenate([left, right], axis=0)
+    return mixed
+
+
 def run_bc_training(
     *,
     dataset_path: Optional[Path],
+    raw_dataset_path: Optional[Path] = None,
+    aug_dataset_path: Optional[Path] = None,
+    mix_aug_ratio: float = 0.0,
     env_name: Optional[str],
     state_dim: int,
     action_dim: int,
@@ -101,10 +140,14 @@ def run_bc_training(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    if dataset_path is not None:
-        data = load_offline_dataset(dataset_path)
-    else:
-        data = load_d4rl_dataset(env_name)
+    data = build_bc_training_data(
+        dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=aug_dataset_path,
+        env_name=env_name,
+        mix_aug_ratio=mix_aug_ratio,
+        seed=seed,
+    )
 
     dataset = OfflineReplayDataset(data)
     loader = build_dataloader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
@@ -119,6 +162,7 @@ def run_bc_training(
         "epochs": epochs,
         "seed": seed,
         "device": device,
+        "mix_aug_ratio": mix_aug_ratio,
     }
     logger = ExperimentLogger(
         save_dir=save_dir,
@@ -149,6 +193,9 @@ def run_bc_training(
 def main() -> None:
     parser = build_parser()
     parser.add_argument("--dataset-path", dest="dataset_path", type=str, default=None)
+    parser.add_argument("--raw-dataset-path", dest="raw_dataset_path", type=str, default=None)
+    parser.add_argument("--aug-dataset-path", dest="aug_dataset_path", type=str, default=None)
+    parser.add_argument("--mix-aug-ratio", dest="mix_aug_ratio", type=float, default=0.0)
     parser.add_argument("--env-name", dest="env_name", type=str, default=None)
     parser.add_argument("--task", dest="task", type=str, default=None)
     parser.add_argument("--dataset-name", dest="dataset_name", type=str, default=None)
@@ -178,6 +225,9 @@ def main() -> None:
 
     metrics = run_bc_training(
         dataset_path=Path(args.dataset_path) if args.dataset_path else None,
+        raw_dataset_path=Path(args.raw_dataset_path) if args.raw_dataset_path else None,
+        aug_dataset_path=Path(args.aug_dataset_path) if args.aug_dataset_path else None,
+        mix_aug_ratio=args.mix_aug_ratio,
         env_name=resolved_env_name,
         state_dim=state_dim,
         action_dim=action_dim,

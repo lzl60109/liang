@@ -89,6 +89,19 @@ This keeps Bellman regression on grounded transitions while still letting the po
 
 Each training script writes `eval.json` with the normalized D4RL score and a checkpoint under the configured `save_dir`.
 
+BC supports the same raw/augmented mixing pattern:
+
+```console
+python vgks/train_bc.py ^
+  --raw-dataset-path data/halfcheetah-medium-v2.pkl ^
+  --aug-dataset-path data/aug/halfcheetah-medium-v2/halfcheetah-medium-v2.npz ^
+  --mix-aug-ratio 0.1 ^
+  --env-name halfcheetah-medium-v2 ^
+  --save-dir runs/bc/halfcheetah-medium-v2/ratio_0p1
+```
+
+Use this path to test whether VGKS-generated trajectories help a pure imitation objective even when they do not help TD3+BC.
+
 ## Recommended Debugging Workflow
 
 When augmented data hurts performance:
