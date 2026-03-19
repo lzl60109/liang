@@ -1,6 +1,8 @@
 import tempfile
 import unittest
 from pathlib import Path
+from contextlib import redirect_stdout
+from io import StringIO
 
 import numpy as np
 
@@ -121,6 +123,45 @@ class BCTrainingTests(unittest.TestCase):
 
             self.assertTrue((run_dir / "eval.json").exists())
             self.assertIn("normalized_score", metrics["eval"])
+
+    def test_bc_training_prints_progress(self):
+        observations = np.random.randn(12, 3).astype(np.float32)
+        actions = np.random.randn(12, 2).astype(np.float32)
+        next_observations = np.random.randn(12, 3).astype(np.float32)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            dataset_path = tmpdir / "dataset.npz"
+            np.savez(
+                dataset_path,
+                observations=observations,
+                actions=actions,
+                next_observations=next_observations,
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                run_bc_training(
+                    dataset_path=dataset_path,
+                    env_name=None,
+                    state_dim=3,
+                    action_dim=2,
+                    hidden_dim=16,
+                    batch_size=4,
+                    epochs=2,
+                    seed=0,
+                    device="cpu",
+                    save_dir=tmpdir / "runs" / "bc_print",
+                    use_wandb=False,
+                    wandb_project="vgks-tests",
+                    wandb_group="bc",
+                    wandb_name="toy-bc-print",
+                    eval_episodes=2,
+                )
+
+            output = stdout.getvalue()
+            self.assertIn("[Train][BC]", output)
+            self.assertIn("[Eval][BC]", output)
 
 
 if __name__ == "__main__":

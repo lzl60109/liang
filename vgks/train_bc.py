@@ -19,6 +19,11 @@ from vgks.envs import infer_env_dims, make_env, resolve_env_name
 from vgks.eval import evaluate_policy
 from vgks.experiment_logging import ExperimentLogger
 
+try:
+    from tqdm.auto import tqdm
+except ImportError:  # pragma: no cover - fallback when tqdm is unavailable
+    tqdm = None
+
 
 class BCPolicy(nn.Module):
     def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = 256) -> None:
@@ -56,11 +61,46 @@ class ToyEvalEnv:
         return raw_return / 3.0
 
 
-def train_bc_epoch(policy: BCPolicy, loader: DataLoader, optimizer, device: str) -> Dict[str, float]:
+def _format_bc_train_progress(epoch: int, total_epochs: int, metrics: Dict[str, float]) -> str:
+    return (
+        f"[Train][BC] epoch={epoch}/{total_epochs} "
+        f"bc_loss={metrics['bc_loss']:.4f} step_count={metrics['step_count']}"
+    )
+
+
+def _format_bc_eval_progress(metrics: Dict[str, float]) -> str:
+    return (
+        f"[Eval][BC] return={metrics['raw_return']:.4f} "
+        f"normalized_score={metrics['normalized_score']:.4f} episodes={metrics['episodes']:.4f}"
+    )
+
+
+def train_bc_epoch(
+    policy: BCPolicy,
+    loader: DataLoader,
+    optimizer,
+    device: str,
+    *,
+    epoch: int = 1,
+    total_epochs: int = 1,
+    log_every: int = 0,
+) -> Dict[str, float]:
     policy.train()
     total_loss = 0.0
     batch_count = 0
-    for batch in loader:
+    iterator = loader
+    progress = None
+    if tqdm is not None:
+        progress = tqdm(
+            loader,
+            total=len(loader),
+            desc=f"[Train][BC] epoch={epoch}/{total_epochs}",
+            file=sys.stdout,
+            leave=False,
+        )
+        iterator = progress
+
+    for batch in iterator:
         observations = batch["observations"].to(device)
         actions = batch["actions"].to(device)
         predicted = policy(observations)
@@ -70,7 +110,17 @@ def train_bc_epoch(policy: BCPolicy, loader: DataLoader, optimizer, device: str)
         optimizer.step()
         total_loss += float(loss.detach().cpu().item())
         batch_count += 1
-    return {"bc_loss": total_loss / max(1, batch_count), "step_count": batch_count}
+        if progress is not None:
+            progress.set_postfix({"bc_loss": f"{total_loss / max(1, batch_count):.4f}"})
+        elif log_every and batch_count % max(1, log_every) == 0:
+            print(
+                f"[Train][BC] epoch={epoch}/{total_epochs} batch={batch_count}/{len(loader)} "
+                f"bc_loss={total_loss / max(1, batch_count):.4f}",
+                flush=True,
+            )
+    metrics = {"bc_loss": total_loss / max(1, batch_count), "step_count": batch_count}
+    print(_format_bc_train_progress(epoch, total_epochs, metrics), flush=True)
+    return metrics
 
 
 def _make_eval_env(env_name: Optional[str], state_dim: int, action_dim: int):
@@ -136,6 +186,7 @@ def run_bc_training(
     wandb_name: str,
     eval_episodes: int = 10,
     num_workers: int = 0,
+    log_every: int = 0,
 ) -> Dict[str, Dict[str, float]]:
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -178,11 +229,20 @@ def run_bc_training(
 
     epoch_metrics = {}
     for epoch in range(epochs):
-        epoch_metrics = train_bc_epoch(policy, loader, optimizer, device)
+        epoch_metrics = train_bc_epoch(
+            policy,
+            loader,
+            optimizer,
+            device,
+            epoch=epoch + 1,
+            total_epochs=epochs,
+            log_every=log_every,
+        )
         logger.log_metrics(epoch_metrics, step=epoch + 1)
 
     eval_env = _make_eval_env(env_name, state_dim, action_dim)
     eval_metrics = evaluate_policy(eval_env, policy, device=device, n_episodes=eval_episodes)
+    print(_format_bc_eval_progress(eval_metrics), flush=True)
     logger.write_eval(eval_metrics)
     torch.save(policy.state_dict(), save_dir / "checkpoint.pt")
     logger.finish()
@@ -204,6 +264,7 @@ def main() -> None:
     parser.add_argument("--hidden-dim", dest="hidden_dim", type=int, default=256)
     parser.add_argument("--batch-size", dest="batch_size", type=int, default=256)
     parser.add_argument("--epochs", dest="epochs", type=int, default=50)
+    parser.add_argument("--log-every", dest="log_every", type=int, default=0)
     parser.add_argument("--seed", dest="seed", type=int, default=0)
     parser.add_argument("--save-dir", dest="save_dir", type=str, required=True)
     parser.add_argument("--use-wandb", dest="use_wandb", action="store_true")
@@ -243,6 +304,7 @@ def main() -> None:
         wandb_name=args.wandb_name,
         eval_episodes=args.eval_episodes,
         num_workers=args.num_workers,
+        log_every=args.log_every,
     )
     print(json.dumps(metrics, indent=2))
 
