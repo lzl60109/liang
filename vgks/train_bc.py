@@ -75,6 +75,18 @@ def _format_bc_eval_progress(metrics: Dict[str, float]) -> str:
     )
 
 
+def _format_bc_step_progress(step: int, total_steps: int, metrics: Dict[str, float]) -> str:
+    return f"[Train][BC] step={step}/{total_steps} bc_loss={metrics['bc_loss']:.4f}"
+
+
+def _resolve_total_steps(epochs: Optional[int], max_timesteps: Optional[int], loader: DataLoader) -> int:
+    if max_timesteps is not None:
+        return int(max_timesteps)
+    if epochs is None:
+        raise ValueError("Either epochs or max_timesteps must be provided")
+    return int(max(1, epochs) * max(1, len(loader)))
+
+
 def train_bc_epoch(
     policy: BCPolicy,
     loader: DataLoader,
@@ -121,6 +133,24 @@ def train_bc_epoch(
     metrics = {"bc_loss": total_loss / max(1, batch_count), "step_count": batch_count}
     print(_format_bc_train_progress(epoch, total_epochs, metrics), flush=True)
     return metrics
+
+
+def train_bc_step(policy: BCPolicy, batch: Dict[str, torch.Tensor], optimizer, device: str) -> Dict[str, float]:
+    policy.train()
+    observations = batch["observations"].to(device)
+    actions = batch["actions"].to(device)
+    predicted = policy(observations)
+    loss = torch.mean((predicted - actions) ** 2)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    return {"bc_loss": float(loss.detach().cpu().item())}
+
+
+def infinite_batches(loader: DataLoader):
+    while True:
+        for batch in loader:
+            yield batch
 
 
 def _make_eval_env(env_name: Optional[str], state_dim: int, action_dim: int):
@@ -176,7 +206,9 @@ def run_bc_training(
     action_dim: int,
     hidden_dim: int,
     batch_size: int,
-    epochs: int,
+    epochs: Optional[int],
+    max_timesteps: Optional[int] = None,
+    eval_freq: int = 5000,
     seed: int,
     device: str,
     save_dir: Path,
@@ -211,6 +243,8 @@ def run_bc_training(
         "hidden_dim": hidden_dim,
         "batch_size": batch_size,
         "epochs": epochs,
+        "max_timesteps": max_timesteps,
+        "eval_freq": eval_freq,
         "seed": seed,
         "device": device,
         "mix_aug_ratio": mix_aug_ratio,
@@ -227,27 +261,46 @@ def run_bc_training(
     policy = BCPolicy(state_dim=state_dim, action_dim=action_dim, hidden_dim=hidden_dim).to(device)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
 
-    epoch_metrics = {}
-    for epoch in range(epochs):
-        epoch_metrics = train_bc_epoch(
-            policy,
-            loader,
-            optimizer,
-            device,
-            epoch=epoch + 1,
-            total_epochs=epochs,
-            log_every=log_every,
-        )
-        logger.log_metrics(epoch_metrics, step=epoch + 1)
-
     eval_env = _make_eval_env(env_name, state_dim, action_dim)
-    eval_metrics = evaluate_policy(eval_env, policy, device=device, n_episodes=eval_episodes)
-    print(_format_bc_eval_progress(eval_metrics), flush=True)
+    train_metrics = {}
+    eval_metrics = {}
+
+    if max_timesteps is None:
+        if epochs is None:
+            raise ValueError("Either epochs or max_timesteps must be provided")
+        epoch_metrics = {}
+        for epoch in range(epochs):
+            epoch_metrics = train_bc_epoch(
+                policy,
+                loader,
+                optimizer,
+                device,
+                epoch=epoch + 1,
+                total_epochs=epochs,
+                log_every=log_every,
+            )
+            logger.log_metrics(epoch_metrics, step=epoch + 1)
+        train_metrics = epoch_metrics
+        eval_metrics = evaluate_policy(eval_env, policy, device=device, n_episodes=eval_episodes)
+        print(_format_bc_eval_progress(eval_metrics), flush=True)
+    else:
+        total_steps = _resolve_total_steps(epochs=None, max_timesteps=max_timesteps, loader=loader)
+        batch_iterator = infinite_batches(loader)
+        for step in range(total_steps):
+            train_metrics = train_bc_step(policy, next(batch_iterator), optimizer, device)
+            if (step + 1) % max(1, log_every) == 0:
+                logger.log_metrics({f"train/{k}": v for k, v in train_metrics.items()}, step=step + 1)
+                print(_format_bc_step_progress(step + 1, total_steps, train_metrics), flush=True)
+            if (step + 1) % max(1, eval_freq) == 0 or step == total_steps - 1:
+                eval_metrics = evaluate_policy(eval_env, policy, device=device, n_episodes=eval_episodes)
+                logger.log_metrics({f"eval/{k}": v for k, v in eval_metrics.items()}, step=step + 1)
+                print(_format_bc_eval_progress(eval_metrics), flush=True)
+
     logger.write_eval(eval_metrics)
     torch.save(policy.state_dict(), save_dir / "checkpoint.pt")
     logger.finish()
 
-    return {"train": epoch_metrics, "eval": eval_metrics}
+    return {"train": train_metrics, "eval": eval_metrics}
 
 
 def main() -> None:
@@ -264,6 +317,8 @@ def main() -> None:
     parser.add_argument("--hidden-dim", dest="hidden_dim", type=int, default=256)
     parser.add_argument("--batch-size", dest="batch_size", type=int, default=256)
     parser.add_argument("--epochs", dest="epochs", type=int, default=50)
+    parser.add_argument("--max-timesteps", dest="max_timesteps", type=int, default=None)
+    parser.add_argument("--eval-freq", dest="eval_freq", type=int, default=5000)
     parser.add_argument("--log-every", dest="log_every", type=int, default=0)
     parser.add_argument("--seed", dest="seed", type=int, default=0)
     parser.add_argument("--save-dir", dest="save_dir", type=str, required=True)
@@ -295,6 +350,8 @@ def main() -> None:
         hidden_dim=args.hidden_dim,
         batch_size=args.batch_size,
         epochs=args.epochs,
+        max_timesteps=args.max_timesteps,
+        eval_freq=args.eval_freq,
         seed=args.seed,
         device=args.device,
         save_dir=Path(args.save_dir),
