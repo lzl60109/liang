@@ -102,6 +102,27 @@ python vgks/train_bc.py ^
 
 Use this path to test whether VGKS-generated trajectories help a pure imitation objective even when they do not help TD3+BC.
 
+If you want a closer match to the [CORL](https://github.com/tinkoff-ai/CORL) training style, use the dedicated CORL-style BC entrypoint. It keeps the step-based loop, periodic evaluation, and GPU-first defaults while accepting VGKS raw/augmented datasets:
+
+```console
+python vgks/train_corl_bc.py ^
+  --raw-dataset-path data/halfcheetah-medium-expert-v2.pkl ^
+  --aug-dataset-path data/aug/halfcheetah-medium-expert-v2/halfcheetah-medium-expert-v2.npz ^
+  --mix-aug-ratio 0.1 ^
+  --env-name halfcheetah-medium-expert-v2 ^
+  --device cuda ^
+  --max-timesteps 1000000 ^
+  --eval-freq 5000 ^
+  --log-every 1000 ^
+  --save-dir runs/corl_bc/halfcheetah-medium-expert-v2/ratio_0p1
+```
+
+Notes for CORL-style BC:
+
+- `train_corl_bc.py` defaults to `--device cuda`, unlike the lightweight `train_bc.py` helper.
+- `--frac 1.0` keeps the full mixed dataset. Set `--frac 0.1` if you want behavior closer to CORL's original `any_percent_bc.py`.
+- Synthetic transitions without reward or terminal labels are still accepted; missing fields are filled with zeros because BC only supervises actions.
+
 ## Recommended Debugging Workflow
 
 When augmented data hurts performance:
