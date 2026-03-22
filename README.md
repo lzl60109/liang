@@ -87,6 +87,17 @@ TD3+BC uses a split training scheme in mixed mode:
 
 This keeps Bellman regression on grounded transitions while still letting the policy imitate filtered synthetic behavior.
 
+IQL supports the same raw/augmented mixing interface and prints the same step-based progress format as TD3+BC:
+
+```console
+python train_iql.py ^
+  --config configs/offline_rl/iql.yaml ^
+  --raw-dataset-path data/halfcheetah-medium-expert-v2.pkl ^
+  --aug-dataset-path data/aug/halfcheetah-medium-expert-v2/halfcheetah-medium-expert-v2.npz ^
+  --mix-aug-ratio 0.1 ^
+  --save-dir runs/iql/halfcheetah-medium-expert-v2/ratio_0p1
+```
+
 Each training script writes `eval.json` with the normalized D4RL score and a checkpoint under the configured `save_dir`.
 
 BC supports the same raw/augmented mixing pattern:

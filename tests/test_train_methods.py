@@ -147,6 +147,12 @@ class MethodTrainingTests(unittest.TestCase):
         for key in ("raw_dataset_path", "aug_dataset_path", "mix_aug_ratio"):
             self.assertIn(key, config)
 
+    def test_iql_config_includes_aug_mixture_fields(self):
+        config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/iql.yaml").read_text(encoding="utf-8"))
+
+        for key in ("raw_dataset_path", "aug_dataset_path", "mix_aug_ratio"):
+            self.assertIn(key, config)
+
     def test_run_td3bc_training_accepts_raw_and_aug_dataset_paths(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
@@ -189,6 +195,53 @@ class MethodTrainingTests(unittest.TestCase):
                 wandb_project="vgks-tests",
                 wandb_group="td3bc",
                 wandb_name="mix-td3bc",
+                eval_episodes=2,
+                num_workers=0,
+            )
+
+            self.assertIn("normalized_score", metrics["eval"])
+
+    def test_run_iql_training_accepts_raw_and_aug_dataset_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            raw_path = tmpdir / "raw.npz"
+            aug_path = tmpdir / "aug.npz"
+            np.savez(
+                raw_path,
+                observations=np.random.randn(24, 3).astype(np.float32),
+                actions=np.random.uniform(-1.0, 1.0, size=(24, 2)).astype(np.float32),
+                next_observations=np.random.randn(24, 3).astype(np.float32),
+                rewards=np.random.randn(24).astype(np.float32),
+                terminals=np.zeros(24, dtype=np.float32),
+            )
+            np.savez(
+                aug_path,
+                observations=np.random.randn(12, 3).astype(np.float32),
+                actions=np.random.uniform(-1.0, 1.0, size=(12, 2)).astype(np.float32),
+                next_observations=np.random.randn(12, 3).astype(np.float32),
+                q_values=np.full(12, 5.0, dtype=np.float32),
+            )
+
+            metrics = run_iql_training(
+                dataset_path=None,
+                raw_dataset_path=raw_path,
+                aug_dataset_path=aug_path,
+                mix_aug_ratio=0.25,
+                env_name=None,
+                state_dim=3,
+                action_dim=2,
+                hidden_dim=16,
+                batch_size=8,
+                max_timesteps=4,
+                eval_freq=2,
+                log_every=1,
+                seed=0,
+                device="cpu",
+                save_dir=tmpdir / "runs" / "iql_mix",
+                use_wandb=False,
+                wandb_project="vgks-tests",
+                wandb_group="iql",
+                wandb_name="mix-iql",
                 eval_episodes=2,
                 num_workers=0,
             )

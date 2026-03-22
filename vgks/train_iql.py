@@ -11,6 +11,7 @@ import torch
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from vgks.data import OfflineReplayDataset, build_dataloader
 from vgks.envs import infer_env_dims, make_env, resolve_env_name
 from vgks.eval import evaluate_policy
 from vgks.train_vgks import infer_dims_from_dataset_source, load_config_file, merge_config_with_args
@@ -18,11 +19,12 @@ from vgks.offline_rl import (
     DeterministicActor,
     TwinQ,
     ValueNet,
+    build_td3bc_training_data,
+    compute_state_stats,
     format_eval_progress,
     format_train_progress,
     infinite_batches,
     make_eval_env,
-    make_offline_loader,
     resolve_total_steps,
     save_training_outputs,
     iql_train_step,
@@ -33,6 +35,9 @@ from vgks.experiment_logging import ExperimentLogger
 def run_iql_training(
     *,
     dataset_path: Optional[Path],
+    raw_dataset_path: Optional[Path] = None,
+    aug_dataset_path: Optional[Path] = None,
+    mix_aug_ratio: float = 0.0,
     env_name: Optional[str],
     state_dim: int,
     action_dim: int,
@@ -55,7 +60,22 @@ def run_iql_training(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    data, loader = make_offline_loader(dataset_path, env_name, batch_size, num_workers)
+    data = build_td3bc_training_data(
+        dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=aug_dataset_path,
+        env_name=env_name,
+        mix_aug_ratio=mix_aug_ratio,
+        seed=seed,
+    )
+    dataset = OfflineReplayDataset(data)
+    loader = build_dataloader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+    )
+    state_stats = compute_state_stats(data)
     logger = ExperimentLogger(
         save_dir=save_dir,
         use_wandb=use_wandb,
@@ -65,6 +85,10 @@ def run_iql_training(
         config={
             "method": "iql",
             "env_name": env_name,
+            "dataset_path": str(dataset_path) if dataset_path is not None else None,
+            "raw_dataset_path": str(raw_dataset_path) if raw_dataset_path is not None else None,
+            "aug_dataset_path": str(aug_dataset_path) if aug_dataset_path is not None else None,
+            "mix_aug_ratio": mix_aug_ratio,
             "epochs": epochs,
             "max_timesteps": max_timesteps,
             "eval_freq": eval_freq,
@@ -100,7 +124,14 @@ def run_iql_training(
 
     save_training_outputs(
         logger,
-        {"actor": actor.state_dict(), "critic": critic.state_dict(), "value_net": value_net.state_dict(), "data_keys": list(data.keys())},
+        {
+            "actor": actor.state_dict(),
+            "critic": critic.state_dict(),
+            "value_net": value_net.state_dict(),
+            "data_keys": list(data.keys()),
+            "state_mean": state_stats["state_mean"],
+            "state_std": state_stats["state_std"],
+        },
         save_dir,
         eval_metrics,
     )
@@ -111,6 +142,9 @@ def main() -> None:
     parser = __import__("argparse").ArgumentParser(description="Train IQL on offline data")
     parser.add_argument("--config", dest="config", type=str, default=None)
     parser.add_argument("--dataset-path", dest="dataset_path", type=str, default=None)
+    parser.add_argument("--raw-dataset-path", dest="raw_dataset_path", type=str, default=None)
+    parser.add_argument("--aug-dataset-path", dest="aug_dataset_path", type=str, default=None)
+    parser.add_argument("--mix-aug-ratio", dest="mix_aug_ratio", type=float, default=0.0)
     parser.add_argument("--env-name", dest="env_name", type=str, default=None)
     parser.add_argument("--task", dest="task", type=str, default=None)
     parser.add_argument("--dataset-name", dest="dataset_name", type=str, default=None)
@@ -133,6 +167,9 @@ def main() -> None:
     parser.add_argument("--num-workers", dest="num_workers", type=int, default=0)
     parser.set_defaults(
         dataset_path=None,
+        raw_dataset_path=None,
+        aug_dataset_path=None,
+        mix_aug_ratio=None,
         env_name=None,
         task=None,
         dataset_name=None,
@@ -177,6 +214,9 @@ def main() -> None:
 
     metrics = run_iql_training(
         dataset_path=dataset_path,
+        raw_dataset_path=Path(merged["raw_dataset_path"]) if merged.get("raw_dataset_path") else None,
+        aug_dataset_path=Path(merged["aug_dataset_path"]) if merged.get("aug_dataset_path") else None,
+        mix_aug_ratio=merged.get("mix_aug_ratio", 0.0),
         env_name=resolved_env_name,
         state_dim=state_dim,
         action_dim=action_dim,
