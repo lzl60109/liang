@@ -3,10 +3,12 @@ from pathlib import Path
 
 from vgks.train_vgks import load_config_file
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 class VGKSPresetTests(unittest.TestCase):
     def test_shared_base_and_task_presets_exist(self):
-        config_dir = Path("H:/codex_test/nips2026/configs")
+        config_dir = REPO_ROOT / "configs"
         expected = [
             "vgks.base.yaml",
             "vgks.mujoco.base.yaml",
@@ -46,16 +48,16 @@ class VGKSPresetTests(unittest.TestCase):
             self.assertTrue((config_dir / name).exists(), msg=name)
 
     def test_task_preset_contains_dataset_and_save_dir(self):
-        config = load_config_file(Path("H:/codex_test/nips2026/configs/vgks.walker2d-medium.yaml"))
+        config = load_config_file(REPO_ROOT / "configs" / "vgks.walker2d-medium.yaml")
 
         self.assertEqual(config["dataset_path"], "data/d4rl/walker2d-medium-v2")
         self.assertEqual(config["save_dir"], "runs/vgks/walker2d-medium-v2/seed_0")
 
     def test_family_presets_inherit_domain_specific_defaults(self):
-        maze_config = load_config_file(Path("H:/codex_test/nips2026/configs/vgks.maze2d-large.yaml"))
-        antmaze_config = load_config_file(Path("H:/codex_test/nips2026/configs/vgks.antmaze-large-play.yaml"))
-        adroit_config = load_config_file(Path("H:/codex_test/nips2026/configs/vgks.pen-human.yaml"))
-        kitchen_config = load_config_file(Path("H:/codex_test/nips2026/configs/vgks.kitchen-mixed.yaml"))
+        maze_config = load_config_file(REPO_ROOT / "configs" / "vgks.maze2d-large.yaml")
+        antmaze_config = load_config_file(REPO_ROOT / "configs" / "vgks.antmaze-large-play.yaml")
+        adroit_config = load_config_file(REPO_ROOT / "configs" / "vgks.pen-human.yaml")
+        kitchen_config = load_config_file(REPO_ROOT / "configs" / "vgks.kitchen-mixed.yaml")
 
         self.assertEqual(maze_config["dataset_path"], "data/d4rl/maze2d-large-v1")
         self.assertEqual(maze_config["epochs"], 30)

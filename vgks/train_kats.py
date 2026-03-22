@@ -60,7 +60,15 @@ def _train_koopman_components(
 
 def _concatenate_augmented_batches(batches):
     keys = batches[0].keys()
-    return {key: torch.cat([batch[key] for batch in batches], dim=0) for key in keys}
+    merged = {}
+    for key in keys:
+        values = [batch[key] for batch in batches]
+        first = values[0]
+        if isinstance(first, torch.Tensor):
+            merged[key] = torch.cat(values, dim=0)
+        else:
+            merged[key] = sum(int(value) for value in values)
+    return merged
 
 
 def run_kats_training(

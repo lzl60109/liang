@@ -86,6 +86,10 @@ def _train_koopman_epoch(
 ) -> Dict[str, float]:
     dynamics.train()
     inverse_model.train()
+    for param in dynamics.parameters():
+        param.requires_grad_(True)
+    for param in inverse_model.parameters():
+        param.requires_grad_(True)
     totals = {"state_loss": 0.0, "action_loss": 0.0, "latent_loss": 0.0, "total_loss": 0.0, "step_count": 0}
     for batch in loader:
         observations = batch["observations"].to(device)
@@ -128,6 +132,8 @@ def _train_conservative_critic_epoch(
     cql_alpha: float,
 ) -> Dict[str, float]:
     critic.train()
+    for param in critic.parameters():
+        param.requires_grad_(True)
     totals = {"critic_loss": 0.0, "bellman_loss": 0.0, "cql_loss": 0.0, "q_mean": 0.0, "step_count": 0}
     for batch in loader:
         observations = batch["observations"].to(device)
