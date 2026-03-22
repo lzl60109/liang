@@ -27,6 +27,12 @@ from vgks.train_vgks import build_trainer_from_args
 
 
 class MethodTrainingTests(unittest.TestCase):
+    def test_cql_config_includes_aug_mixture_fields(self):
+        config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/cql.yaml").read_text(encoding="utf-8"))
+
+        for key in ("raw_dataset_path", "aug_dataset_path", "mix_aug_ratio"):
+            self.assertIn(key, config)
+
     def test_build_td3bc_dataset_uses_raw_only_when_mix_ratio_zero(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
@@ -247,6 +253,99 @@ class MethodTrainingTests(unittest.TestCase):
             )
 
             self.assertIn("normalized_score", metrics["eval"])
+
+    def test_run_cql_training_accepts_raw_and_aug_dataset_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            raw_path = tmpdir / "raw.npz"
+            aug_path = tmpdir / "aug.npz"
+            np.savez(
+                raw_path,
+                observations=np.random.randn(24, 3).astype(np.float32),
+                actions=np.random.uniform(-1.0, 1.0, size=(24, 2)).astype(np.float32),
+                next_observations=np.random.randn(24, 3).astype(np.float32),
+                rewards=np.random.randn(24).astype(np.float32),
+                terminals=np.zeros(24, dtype=np.float32),
+            )
+            np.savez(
+                aug_path,
+                observations=np.random.randn(12, 3).astype(np.float32),
+                actions=np.random.uniform(-1.0, 1.0, size=(12, 2)).astype(np.float32),
+                next_observations=np.random.randn(12, 3).astype(np.float32),
+                q_values=np.full(12, 5.0, dtype=np.float32),
+            )
+
+            metrics = run_cql_training(
+                dataset_path=None,
+                raw_dataset_path=raw_path,
+                aug_dataset_path=aug_path,
+                mix_aug_ratio=0.25,
+                env_name=None,
+                state_dim=3,
+                action_dim=2,
+                hidden_dim=16,
+                batch_size=8,
+                max_timesteps=4,
+                eval_freq=2,
+                log_every=1,
+                seed=0,
+                device="cpu",
+                save_dir=tmpdir / "runs" / "cql_mix",
+                use_wandb=False,
+                wandb_project="vgks-tests",
+                wandb_group="cql",
+                wandb_name="mix-cql",
+                eval_episodes=2,
+                num_workers=0,
+            )
+
+            self.assertIn("normalized_score", metrics["eval"])
+            self.assertEqual(metrics["data"]["source"], "mixed")
+
+    def test_generate_augmented_dataset_respects_q_threshold(self):
+        observations = np.random.randn(16, 3).astype(np.float32)
+        actions = np.random.randn(16, 2).astype(np.float32)
+        next_observations = np.random.randn(16, 3).astype(np.float32)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            dataset_path = tmpdir / "dataset.npz"
+            np.savez(
+                dataset_path,
+                observations=observations,
+                actions=actions,
+                next_observations=next_observations,
+            )
+
+            trainer = build_trainer_from_args(
+                state_dim=3,
+                action_dim=2,
+                latent_dim=4,
+                hidden_dim=16,
+                lambda_q=0.1,
+                lambda_state_anchor=1.0,
+                lambda_latent_anchor=0.1,
+                q_clip_min=-20.0,
+                q_clip_max=20.0,
+                sigma_warmup_steps=0,
+                sigma_lr=1e-2,
+                kats_checkpoint=None,
+                critic_checkpoint=None,
+                device="cpu",
+            )
+
+            augmented = generate_augmented_dataset(
+                trainer=trainer,
+                dataset_path=dataset_path,
+                env_name=None,
+                batch_size=4,
+                epochs=1,
+                num_workers=0,
+                q_threshold=100.0,
+            )
+
+            self.assertEqual(int(augmented["observations"].shape[0]), 0)
+            self.assertEqual(int(augmented["num_kept"]), 0)
 
     def test_dual_loader_td3bc_uses_raw_state_stats_for_normalization(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -89,6 +89,15 @@ class VGKSTrainerTests(unittest.TestCase):
         self.assertEqual(filtered["observations"].shape[0], 0)
         self.assertIsInstance(unfiltered["observations"], torch.Tensor)
 
+    def test_augment_batch_reports_kept_sample_count(self):
+        trainer = build_trainer()
+        batch = make_batch()
+
+        augmented = trainer.augment_batch(batch, q_threshold=-100.0)
+
+        self.assertIn("num_kept", augmented)
+        self.assertEqual(int(augmented["num_kept"]), batch["observations"].shape[0])
+
     def test_sigma_loss_tensors_require_grad_and_step_updates_sigma(self):
         trainer = build_trainer()
         batch = make_batch()
