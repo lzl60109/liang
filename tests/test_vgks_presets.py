@@ -68,6 +68,8 @@ class VGKSPresetTests(unittest.TestCase):
         self.assertEqual(adroit_config["dataset_path"], "data/d4rl/pen-human-v1")
         self.assertEqual(adroit_config["hidden_dim"], 512)
         self.assertEqual(adroit_config["sigma_lr"], 0.0005)
+        self.assertIn("koopman_pretrain_epochs", adroit_config)
+        self.assertIn("critic_pretrain_epochs", adroit_config)
 
         self.assertEqual(kitchen_config["dataset_path"], "data/d4rl/kitchen-mixed-v0")
         self.assertEqual(kitchen_config["lambda_state_anchor"], 2.0)

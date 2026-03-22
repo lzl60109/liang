@@ -20,6 +20,8 @@ def load_kats_checkpoint(
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     if "state_dict" in checkpoint:
         checkpoint = checkpoint["state_dict"]
+    if "kats" in checkpoint:
+        checkpoint = checkpoint["kats"]
 
     dynamics_state = checkpoint.get("dynamics") if isinstance(checkpoint, dict) else None
     if dynamics_state is not None:
@@ -38,5 +40,7 @@ def load_tgcvg_critic_checkpoint(
     critic: ConservativeCritic, checkpoint_path: PathLike
 ) -> ConservativeCritic:
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    if isinstance(checkpoint, dict) and "critic_checkpoint" in checkpoint:
+        checkpoint = checkpoint["critic_checkpoint"]
     critic.load_tgcvg_state_dict(checkpoint)
     return critic

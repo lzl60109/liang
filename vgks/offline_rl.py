@@ -252,6 +252,33 @@ def build_td3bc_training_sources(
     return {"critic_data": critic_data, "actor_data": actor_data}
 
 
+def build_mixed_training_data(
+    *,
+    dataset_path: Optional[Path] = None,
+    raw_dataset_path: Optional[Path] = None,
+    aug_dataset_path: Optional[Path] = None,
+    env_name: Optional[str] = None,
+    mix_aug_ratio: float = 0.0,
+    seed: int = 0,
+) -> Dict[str, np.ndarray]:
+    return build_td3bc_training_data(
+        dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=aug_dataset_path,
+        env_name=env_name,
+        mix_aug_ratio=mix_aug_ratio,
+        seed=seed,
+    )
+
+
+def describe_data_source(*, dataset_path: Optional[Path], raw_dataset_path: Optional[Path], aug_dataset_path: Optional[Path], mix_aug_ratio: float) -> str:
+    if dataset_path is not None or raw_dataset_path is None:
+        return "dataset"
+    if aug_dataset_path is not None and mix_aug_ratio > 0.0:
+        return "mixed"
+    return "raw_only"
+
+
 def make_td3bc_loader(
     *,
     dataset_path: Optional[Path],

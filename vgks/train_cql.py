@@ -15,16 +15,18 @@ from vgks.envs import infer_env_dims, make_env, resolve_env_name
 from vgks.eval import evaluate_policy
 from vgks.train_vgks import infer_dims_from_dataset_source, load_config_file, merge_config_with_args
 from vgks.offline_rl import (
+    build_mixed_training_data,
+    describe_data_source,
     DeterministicActor,
     format_eval_progress,
     format_train_progress,
     infinite_batches,
     make_eval_env,
-    make_offline_loader,
     resolve_total_steps,
     save_training_outputs,
     cql_train_step,
 )
+from vgks.data import OfflineReplayDataset, build_dataloader
 from vgks.experiment_logging import ExperimentLogger
 from vgks.models import ConservativeCritic
 
@@ -32,6 +34,9 @@ from vgks.models import ConservativeCritic
 def run_cql_training(
     *,
     dataset_path: Optional[Path],
+    raw_dataset_path: Optional[Path] = None,
+    aug_dataset_path: Optional[Path] = None,
+    mix_aug_ratio: float = 0.0,
     env_name: Optional[str],
     state_dim: int,
     action_dim: int,
@@ -54,7 +59,21 @@ def run_cql_training(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    data, loader = make_offline_loader(dataset_path, env_name, batch_size, num_workers)
+    data = build_mixed_training_data(
+        dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=aug_dataset_path,
+        env_name=env_name,
+        mix_aug_ratio=mix_aug_ratio,
+        seed=seed,
+    )
+    loader = build_dataloader(OfflineReplayDataset(data), batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    data_source = describe_data_source(
+        dataset_path=dataset_path,
+        raw_dataset_path=raw_dataset_path,
+        aug_dataset_path=aug_dataset_path,
+        mix_aug_ratio=mix_aug_ratio,
+    )
     logger = ExperimentLogger(
         save_dir=save_dir,
         use_wandb=use_wandb,
@@ -68,6 +87,10 @@ def run_cql_training(
             "max_timesteps": max_timesteps,
             "eval_freq": eval_freq,
             "log_every": log_every,
+            "raw_dataset_path": None if raw_dataset_path is None else str(raw_dataset_path),
+            "aug_dataset_path": None if aug_dataset_path is None else str(aug_dataset_path),
+            "mix_aug_ratio": mix_aug_ratio,
+            "data_source": data_source,
             "seed": seed,
             "device": device,
         },
@@ -99,13 +122,16 @@ def run_cql_training(
         save_dir,
         eval_metrics,
     )
-    return {"train": train_metrics, "eval": eval_metrics}
+    return {"train": train_metrics, "eval": eval_metrics, "data": {"source": data_source, "num_samples": int(data["observations"].shape[0])}}
 
 
 def main() -> None:
     parser = __import__("argparse").ArgumentParser(description="Train CQL on offline data")
     parser.add_argument("--config", dest="config", type=str, default=None)
     parser.add_argument("--dataset-path", dest="dataset_path", type=str, default=None)
+    parser.add_argument("--raw-dataset-path", dest="raw_dataset_path", type=str, default=None)
+    parser.add_argument("--aug-dataset-path", dest="aug_dataset_path", type=str, default=None)
+    parser.add_argument("--mix-aug-ratio", dest="mix_aug_ratio", type=float, default=None)
     parser.add_argument("--env-name", dest="env_name", type=str, default=None)
     parser.add_argument("--task", dest="task", type=str, default=None)
     parser.add_argument("--dataset-name", dest="dataset_name", type=str, default=None)
@@ -128,6 +154,9 @@ def main() -> None:
     parser.add_argument("--num-workers", dest="num_workers", type=int, default=0)
     parser.set_defaults(
         dataset_path=None,
+        raw_dataset_path=None,
+        aug_dataset_path=None,
+        mix_aug_ratio=None,
         env_name=None,
         task=None,
         dataset_name=None,
@@ -172,6 +201,9 @@ def main() -> None:
 
     metrics = run_cql_training(
         dataset_path=dataset_path,
+        raw_dataset_path=Path(merged["raw_dataset_path"]) if merged.get("raw_dataset_path") else None,
+        aug_dataset_path=Path(merged["aug_dataset_path"]) if merged.get("aug_dataset_path") else None,
+        mix_aug_ratio=merged.get("mix_aug_ratio", 0.0),
         env_name=resolved_env_name,
         state_dim=state_dim,
         action_dim=action_dim,

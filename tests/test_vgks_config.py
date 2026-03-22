@@ -33,6 +33,12 @@ class VGKSConfigTests(unittest.TestCase):
         self.assertEqual(config["dataset_path"], "data/d4rl/walker2d-medium-v2")
         self.assertEqual(config["latent_dim"], 32)
 
+    def test_base_config_contains_staged_training_keys(self):
+        config = load_config_file(Path("H:/codex_test/nips2026/configs/vgks.base.yaml"))
+
+        for key in ("koopman_pretrain_epochs", "critic_pretrain_epochs", "koopman_lr", "critic_lr", "cql_alpha"):
+            self.assertIn(key, config)
+
     def test_merge_config_with_args_prefers_explicit_cli_values(self):
         config = {
             "dataset_path": "data/d4rl/walker2d-medium-v2",

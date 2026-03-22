@@ -116,6 +116,10 @@ class ConservativeCritic(nn.Module):
         return torch.minimum(self.q1(observations, actions), self.q2(observations, actions))
 
     def load_tgcvg_state_dict(self, checkpoint: Dict[str, Dict[str, torch.Tensor]]) -> None:
+        critic_state = checkpoint.get("critic") if isinstance(checkpoint, dict) else None
+        if critic_state is not None:
+            self.load_state_dict(critic_state, strict=True)
+            return
         q1_state = checkpoint.get("critic1") or checkpoint.get("critic_1")
         q2_state = checkpoint.get("critic2") or checkpoint.get("critic_2")
         if q1_state is None or q2_state is None:
