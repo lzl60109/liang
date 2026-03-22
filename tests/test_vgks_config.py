@@ -6,10 +6,12 @@ import yaml
 
 from vgks.train_vgks import load_config_file, merge_config_with_args
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 class VGKSConfigTests(unittest.TestCase):
     def test_default_generation_config_disables_wandb(self):
-        config = load_config_file(Path("H:/codex_test/nips2026/configs/vgks/config.yaml"))
+        config = load_config_file(REPO_ROOT / "configs" / "vgks" / "config.yaml")
 
         self.assertFalse(config["use_wandb"])
 
@@ -34,7 +36,7 @@ class VGKSConfigTests(unittest.TestCase):
         self.assertEqual(config["latent_dim"], 32)
 
     def test_base_config_contains_staged_training_keys(self):
-        config = load_config_file(Path("H:/codex_test/nips2026/configs/vgks.base.yaml"))
+        config = load_config_file(REPO_ROOT / "configs" / "vgks.base.yaml")
 
         for key in ("koopman_pretrain_epochs", "critic_pretrain_epochs", "koopman_lr", "critic_lr", "cql_alpha"):
             self.assertIn(key, config)

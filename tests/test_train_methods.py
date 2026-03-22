@@ -25,10 +25,12 @@ from vgks.train_td3bc import run_td3bc_training
 from vgks.train_tgcvg import run_tgcvg_training
 from vgks.train_vgks import build_trainer_from_args
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 class MethodTrainingTests(unittest.TestCase):
     def test_cql_config_includes_aug_mixture_fields(self):
-        config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/cql.yaml").read_text(encoding="utf-8"))
+        config = yaml.safe_load((REPO_ROOT / "configs" / "offline_rl" / "cql.yaml").read_text(encoding="utf-8"))
 
         for key in ("raw_dataset_path", "aug_dataset_path", "mix_aug_ratio"):
             self.assertIn(key, config)
@@ -148,13 +150,13 @@ class MethodTrainingTests(unittest.TestCase):
             self.assertEqual(int((sources["actor_data"]["observations"] == 1.0).all(axis=1).sum()), 2)
 
     def test_td3bc_config_includes_aug_mixture_fields(self):
-        config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/td3bc.yaml").read_text(encoding="utf-8"))
+        config = yaml.safe_load((REPO_ROOT / "configs" / "offline_rl" / "td3bc.yaml").read_text(encoding="utf-8"))
 
         for key in ("raw_dataset_path", "aug_dataset_path", "mix_aug_ratio"):
             self.assertIn(key, config)
 
     def test_iql_config_includes_aug_mixture_fields(self):
-        config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/iql.yaml").read_text(encoding="utf-8"))
+        config = yaml.safe_load((REPO_ROOT / "configs" / "offline_rl" / "iql.yaml").read_text(encoding="utf-8"))
 
         for key in ("raw_dataset_path", "aug_dataset_path", "mix_aug_ratio"):
             self.assertIn(key, config)
@@ -456,7 +458,7 @@ class MethodTrainingTests(unittest.TestCase):
         self.assertIsNotNone(metrics["actor_loss"])
 
     def test_td3bc_config_includes_stability_hyperparameters(self):
-        config = yaml.safe_load(Path("H:/codex_test/nips2026/configs/offline_rl/td3bc.yaml").read_text(encoding="utf-8"))
+        config = yaml.safe_load((REPO_ROOT / "configs" / "offline_rl" / "td3bc.yaml").read_text(encoding="utf-8"))
 
         for key in ("discount", "tau", "policy_noise", "noise_clip", "policy_freq", "alpha"):
             self.assertIn(key, config)
