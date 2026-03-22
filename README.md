@@ -1,6 +1,12 @@
 # Value-Guided Koopman Symmetry (VGKS)
 
-VGKS is a two-stage offline RL pipeline that generates Koopman-based augmented transitions and then trains a downstream offline RL backbone such as TD3+BC, IQL, or CQL on raw or mixed data.
+VGKS is an offline RL data augmentation pipeline built around three stages:
+
+1. prepare Koopman dynamics and value guidance checkpoints
+2. generate augmented transitions with `VGKS`
+3. validate the generated data with downstream offline RL or IL algorithms
+
+This repository supports both a full "paper-style" pipeline and a lighter shortcut pipeline that skips pretrained checkpoints.
 
 ## Setup
 
@@ -11,7 +17,7 @@ pip install -r requirements-gpu-cu121.txt
 pip install -r requirements-d4rl.txt
 ```
 
-Check the environment stack before long runs:
+Optional environment check:
 
 ```console
 python check_env.py --env-name halfcheetah-medium-v2
@@ -19,106 +25,214 @@ python check_env.py --env-name halfcheetah-medium-v2
 
 ## Data Layout
 
-Download a D4RL dataset into the local `data/` cache:
+You can either point scripts directly at a D4RL-style cached dataset path, or use `env_name` and let the code read from D4RL.
 
-```console
-python -m vgks.download_d4rl_dataset --env-name halfcheetah-medium-v2 --output-dir data
-```
-
-Expected files:
+Typical cached layout:
 
 ```text
 data/
-  halfcheetah-medium-v2.pkl
-  halfcheetah-medium-v2.npy
-  halfcheetah-medium-v2.json
-  halfcheetah-medium-v2/
-    dataset.pkl
-    meta.json
+  d4rl/
+    halfcheetah-medium-v2
+    hopper-medium-expert-v2
+    maze2d-medium-v1
+    pen-human-v1
 ```
 
-## Stage 1: Generate VGKS Augmented Data
+The loaders accept:
 
-Edit `configs/vgks/config.yaml` or pass overrides on the command line, then run:
+- directory with `dataset.pkl`
+- `.pkl`
+- `.npz`
+- `.pt`
+
+## Pipeline Overview
+
+There are two ways to use this repo.
+
+### Full Pipeline
+
+Use this when you want the method to match the intended idea most closely.
+
+1. Train or prepare a `KATS` checkpoint.
+2. Train or prepare a conservative critic checkpoint.
+3. Run `generate_vgks.py` with those checkpoints to synthesize augmented transitions.
+4. Train `TD3BC`, `IQL`, `CQL`, or `BC` on raw-only or raw-plus-augmented data.
+
+In this mode:
+
+- `kats_checkpoint` provides pretrained Koopman dynamics and inverse dynamics
+- `critic_checkpoint` provides the value guidance used during augmentation
+
+### Shortcut Pipeline
+
+Use this when you want to quickly test whether the current `VGKS` generator can produce useful data.
+
+1. Run `generate_vgks.py` without checkpoints.
+2. Train `TD3BC`, `IQL`, `CQL`, or `BC` on the generated data.
+
+In this mode:
+
+- the code still runs
+- but the generator is not using pretrained `KATS` or pretrained value guidance
+- this is a weaker version of the full method
+
+This shortcut is the path you used for the earlier locomotion experiments.
+
+## Stage 1: Prepare Checkpoints
+
+### 1A. Train `KATS`
+
+Use [train_kats.py](/H:/codex_test/nips2026/vgks/train_kats.py) to train Koopman dynamics on the target dataset.
+
+Example:
 
 ```console
-python generate_vgks.py --config configs/vgks/config.yaml
+python vgks/train_kats.py ^
+  --dataset-path data/d4rl/halfcheetah-medium-expert-v2 ^
+  --save-dir runs/kats/halfcheetah-medium-expert-v2/seed_0 ^
+  --device cuda:0
 ```
 
-Generated files are written to:
+What you need from this stage:
+
+- a checkpoint containing Koopman dynamics
+- ideally the trained `inverse_model` as well
+
+This checkpoint is later passed to `VGKS` as `kats_checkpoint`.
+
+### 1B. Train a Conservative Critic
+
+The repository expects a critic checkpoint that can be loaded into the `VGKS` critic for value guidance.
+
+In practice, this should come from a conservative offline RL model trained on the same environment.
+
+This checkpoint is later passed to `VGKS` as `critic_checkpoint`.
+
+Important:
+
+- `kats_checkpoint` and `critic_checkpoint` are not created by `train_td3bc.py` or `train_iql.py`
+- they are inputs to the augmentation stage, not outputs of the final evaluation stage
+
+## Stage 2: Generate Augmented Data
+
+There are two related scripts here.
+
+### `generate_vgks.py`
+
+This is the lightweight augmentation entrypoint.
+
+It:
+
+- builds a `VGKS` trainer
+- optionally loads `kats_checkpoint` and `critic_checkpoint`
+- trains the sigma transformation
+- exports augmented transitions
+
+Example:
+
+```console
+python generate_vgks.py --config configs/vgks.halfcheetah-medium-expert.yaml
+```
+
+Generated outputs typically include:
 
 ```text
-data/aug/<env_name>/<env_name>.pkl
-data/aug/<env_name>/<env_name>.npy
-data/aug/<env_name>/<env_name>.npz
+runs/vgks/<env>/seed_0/
+  <run_name>.npz
+  <run_name>.pkl
+  <run_name>.npy
+  eval.json
 ```
 
-Important notes:
+### `train_vgks.py`
 
-- `kats_checkpoint` should include both Koopman dynamics weights and the trained `inverse_model` weights. VGKS now restores both when available.
-- `critic_checkpoint` should point to a trained conservative critic before enabling value guidance.
-- The generated augmented dataset intentionally stores synthetic `observations`, `actions`, `next_observations`, and `q_values`. It does not copy raw `rewards` or `terminals` onto synthetic transitions.
+This is the fuller training-style `VGKS` script.
 
-## Stage 2: Train Offline RL Backbones
+It does more than just export data:
 
-For pure augmented-data training, point `dataset_path` at the generated dataset in the chosen config:
+- trains sigma across epochs
+- trains an auxiliary BC policy on raw plus augmented data
+- evaluates during training
+- saves `best_checkpoint.pt`, `last_checkpoint.pt`, `checkpoint.pt`
+- exports `augmented_dataset.npz`
+
+Use this when you want:
+
+- a more complete `VGKS` training record
+- `VGKS` checkpoints
+- epoch-by-epoch evaluation history
+
+Example:
 
 ```console
-python train_td3bc.py --config configs/offline_rl/td3bc.yaml
-python train_iql.py --config configs/offline_rl/iql.yaml
-python train_cql.py --config configs/offline_rl/cql.yaml
+python vgks/train_vgks.py ^
+  --config configs/vgks.halfcheetah-medium-expert.yaml ^
+  --save-dir runs/vgks_train/halfcheetah-medium-expert-v2/seed_0
 ```
 
-For safer diagnosis and ablations with TD3+BC, prefer mixing raw and augmented data:
+### Which one should I use?
+
+- use `generate_vgks.py` if your immediate goal is to create augmented data for `TD3BC/IQL/CQL/BC`
+- use `train_vgks.py` if you also want `VGKS` checkpoints and the full training history
+
+## Stage 3: Validate with Offline RL or IL
+
+After augmentation, use the generated dataset with downstream algorithms.
+
+### TD3+BC
 
 ```console
 python train_td3bc.py ^
   --config configs/offline_rl/td3bc.yaml ^
-  --raw-dataset-path data/halfcheetah-medium-v2.pkl ^
-  --aug-dataset-path data/aug/halfcheetah-medium-v2/halfcheetah-medium-v2.npz ^
+  --raw-dataset-path data/d4rl/halfcheetah-medium-expert-v2 ^
+  --aug-dataset-path runs/vgks/halfcheetah-medium-expert-v2/seed_0/halfcheetah-medium-expert-seed0.npz ^
   --mix-aug-ratio 0.1 ^
-  --save-dir runs/td3bc/halfcheetah-medium-v2/ratio_0p1
+  --save-dir runs/td3bc/halfcheetah-medium-expert-v2/ratio_0p1
 ```
 
-TD3+BC uses a split training scheme in mixed mode:
+Mixed-mode `TD3BC` uses:
 
-- critic updates read only the raw dataset
-- actor and BC updates read the raw-plus-augmented mixture
+- raw data for critic updates
+- mixed raw plus augmented data for actor and BC updates
 
-This keeps Bellman regression on grounded transitions while still letting the policy imitate filtered synthetic behavior.
-
-IQL supports the same raw/augmented mixing interface and prints the same step-based progress format as TD3+BC:
+### IQL
 
 ```console
 python train_iql.py ^
   --config configs/offline_rl/iql.yaml ^
-  --raw-dataset-path data/halfcheetah-medium-expert-v2.pkl ^
-  --aug-dataset-path data/aug/halfcheetah-medium-expert-v2/halfcheetah-medium-expert-v2.npz ^
+  --raw-dataset-path data/d4rl/halfcheetah-medium-expert-v2 ^
+  --aug-dataset-path runs/vgks/halfcheetah-medium-expert-v2/seed_0/halfcheetah-medium-expert-seed0.npz ^
   --mix-aug-ratio 0.1 ^
   --save-dir runs/iql/halfcheetah-medium-expert-v2/ratio_0p1
 ```
 
-Each training script writes `eval.json` with the normalized D4RL score and a checkpoint under the configured `save_dir`.
+`IQL` now supports the same raw-plus-augmented mixing interface as `TD3BC`.
 
-BC supports the same raw/augmented mixing pattern:
+### CQL
+
+```console
+python train_cql.py --config configs/offline_rl/cql.yaml
+```
+
+At the moment, `CQL` is primarily used with a single dataset path. Extend it in the same style as `TD3BC/IQL` if you want mixed raw-plus-augmented experiments.
+
+### BC
 
 ```console
 python vgks/train_bc.py ^
-  --raw-dataset-path data/halfcheetah-medium-v2.pkl ^
-  --aug-dataset-path data/aug/halfcheetah-medium-v2/halfcheetah-medium-v2.npz ^
+  --raw-dataset-path data/d4rl/halfcheetah-medium-expert-v2 ^
+  --aug-dataset-path runs/vgks/halfcheetah-medium-expert-v2/seed_0/halfcheetah-medium-expert-seed0.npz ^
   --mix-aug-ratio 0.1 ^
-  --env-name halfcheetah-medium-v2 ^
-  --save-dir runs/bc/halfcheetah-medium-v2/ratio_0p1
+  --env-name halfcheetah-medium-expert-v2 ^
+  --save-dir runs/bc/halfcheetah-medium-expert-v2/ratio_0p1
 ```
 
-Use this path to test whether VGKS-generated trajectories help a pure imitation objective even when they do not help TD3+BC.
-
-If you want a closer match to the [CORL](https://github.com/tinkoff-ai/CORL) training style, use the dedicated CORL-style BC entrypoint. It keeps the step-based loop, periodic evaluation, and GPU-first defaults while accepting VGKS raw/augmented datasets:
+### CORL-style BC
 
 ```console
 python vgks/train_corl_bc.py ^
-  --raw-dataset-path data/halfcheetah-medium-expert-v2.pkl ^
-  --aug-dataset-path data/aug/halfcheetah-medium-expert-v2/halfcheetah-medium-expert-v2.npz ^
+  --raw-dataset-path data/d4rl/halfcheetah-medium-expert-v2 ^
+  --aug-dataset-path runs/vgks/halfcheetah-medium-expert-v2/seed_0/halfcheetah-medium-expert-seed0.npz ^
   --mix-aug-ratio 0.1 ^
   --env-name halfcheetah-medium-expert-v2 ^
   --device cuda ^
@@ -128,20 +242,87 @@ python vgks/train_corl_bc.py ^
   --save-dir runs/corl_bc/halfcheetah-medium-expert-v2/ratio_0p1
 ```
 
-Notes for CORL-style BC:
+## Configuration Notes
 
-- `train_corl_bc.py` defaults to `--device cuda`, unlike the lightweight `train_bc.py` helper.
-- `--frac 1.0` keeps the full mixed dataset. Set `--frac 0.1` if you want behavior closer to CORL's original `any_percent_bc.py`.
-- Synthetic transitions without reward or terminal labels are still accepted; missing fields are filled with zeros because BC only supervises actions.
+### Default config vs environment-specific configs
 
-## Recommended Debugging Workflow
+[configs/vgks/config.yaml](/H:/codex_test/nips2026/configs/vgks/config.yaml) is only a default example.
 
-When augmented data hurts performance:
+For actual experiments, prefer the environment-specific configs already provided, such as:
 
-1. Run `raw_only` with `--raw-dataset-path` and `--mix-aug-ratio 0.0`.
-2. Add a small amount of augmented data such as `--mix-aug-ratio 0.05` or `0.1`.
-3. Verify that the stage-1 run used a real `kats_checkpoint` and `critic_checkpoint`.
-4. Compare `critic_loss`, `q_mean`, and final `normalized_score` across runs.
+- [configs/vgks.halfcheetah-medium-expert.yaml](/H:/codex_test/nips2026/configs/vgks.halfcheetah-medium-expert.yaml)
+- [configs/vgks.maze2d-medium.yaml](/H:/codex_test/nips2026/configs/vgks.maze2d-medium.yaml)
+- [configs/vgks.pen-human.yaml](/H:/codex_test/nips2026/configs/vgks.pen-human.yaml)
+
+These configs inherit from base files such as:
+
+- [configs/vgks.mujoco.base.yaml](/H:/codex_test/nips2026/configs/vgks.mujoco.base.yaml)
+- [configs/vgks.maze2d.base.yaml](/H:/codex_test/nips2026/configs/vgks.maze2d.base.yaml)
+- [configs/vgks.adroit.base.yaml](/H:/codex_test/nips2026/configs/vgks.adroit.base.yaml)
+
+### `kats_checkpoint` and `critic_checkpoint`
+
+These are optional in code, but important in the full method.
+
+- if left empty, `VGKS` will still run
+- but it will not be using pretrained Koopman dynamics or pretrained value guidance
+
+So:
+
+- empty checkpoint fields are acceptable for quick debugging
+- filled checkpoint fields are preferred for serious experiments
+
+### Generated data contents
+
+The generated augmented dataset intentionally stores:
+
+- `observations`
+- `actions`
+- `next_observations`
+- optional `q_values`
+
+It does not copy raw `rewards` and `terminals` onto synthetic transitions.
+
+## Recommended Experiment Order
+
+If you are starting a new environment, the most reliable order is:
+
+1. verify the raw dataset path works
+2. train or prepare `kats_checkpoint`
+3. train or prepare `critic_checkpoint`
+4. run `generate_vgks.py`
+5. run `TD3BC` on `raw_only`
+6. run `TD3BC` on `ratio=0.1`
+7. run `TD3BC` on `ratio=0.2`
+8. if promising, repeat with `IQL`
+
+For quick diagnostics, a shortcut order is:
+
+1. run `generate_vgks.py` without checkpoints
+2. run `TD3BC raw_only`
+3. run `TD3BC ratio=0.1`
+4. run `TD3BC ratio=0.2`
+
+## Common Confusions
+
+### "Why did `generate_vgks.py` run even though checkpoints were empty?"
+
+Because checkpoint loading is optional. Empty checkpoint fields do not stop the script.
+
+### "Do `train_td3bc.py` or `train_iql.py` produce `kats_checkpoint` and `critic_checkpoint`?"
+
+No.
+
+- `kats_checkpoint` should come from `KATS` training
+- `critic_checkpoint` should come from a critic trained before augmentation
+- `TD3BC/IQL/CQL/BC` are downstream evaluation stages
+
+### "Do I need `train_vgks.py` to use VGKS?"
+
+Not always.
+
+- no, if you only want augmented data and will use `generate_vgks.py`
+- yes, if you want the fuller `VGKS` training workflow and checkpoints
 
 ## Convenience Script
 
