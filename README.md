@@ -84,6 +84,14 @@ This shortcut is the path you used for the earlier locomotion experiments.
 
 Use [train_kats.py](/H:/codex_test/nips2026/vgks/train_kats.py) to train Koopman dynamics on the target dataset.
 
+Important:
+
+- for real experiments, always pass an environment-specific config with `--config`
+- do not rely on `--dataset-path` alone
+- `dataset_path` only tells the script where the data lives
+- the config controls the training hyperparameters such as `epochs`, `batch_size`, `sigma_lr`, `lambda_q`, and output naming
+- if you run the script without the matching config, you can easily end up using debug-like settings such as `epochs=1`
+
 Example:
 
 ```console
@@ -167,6 +175,8 @@ Example:
 ```console
 python vgks/train_vgks.py ^
   --config configs/vgks.halfcheetah-medium-expert.yaml ^
+  --dataset-path data/d4rl/halfcheetah-medium-expert-v2 ^
+  --env-name halfcheetah-medium-expert-v2 ^
   --save-dir runs/vgks_train/halfcheetah-medium-expert-v2/seed_0
 ```
 
@@ -247,6 +257,42 @@ python vgks/train_corl_bc.py ^
 ### Default config vs environment-specific configs
 
 [configs/vgks/config.yaml](/H:/codex_test/nips2026/configs/vgks/config.yaml) is only a default example.
+
+When training checkpoints, the safest pattern is:
+
+1. choose the config that matches the dataset
+2. pass it explicitly with `--config`
+3. optionally override `dataset_path` or `save_dir` on the command line
+
+For example, if you are training on `halfcheetah-medium-expert-v2`, prefer:
+
+```console
+python vgks/train_vgks.py ^
+  --config configs/vgks.halfcheetah-medium-expert.yaml ^
+  --dataset-path data/d4rl/halfcheetah-medium-expert-v2 ^
+  --env-name halfcheetah-medium-expert-v2 ^
+  --save-dir runs/vgks_train/halfcheetah-medium-expert-v2/seed_0
+```
+
+Do not assume that changing only `dataset_path` is enough. In this repository:
+
+- the dataset-specific config sets the intended hyperparameters for that family of tasks
+- `configs/vgks.mujoco.base.yaml` is the shared base for MuJoCo tasks
+- `configs/vgks.base.yaml` is the lowest-level global default
+- `configs/vgks.yaml` is only the default entry config and should not be your main way to switch experiments
+
+In practice:
+
+- edit the dataset-specific config first if you are changing one experiment
+- edit the family base such as `vgks.mujoco.base.yaml` only if you want the same change to affect all tasks in that family
+- avoid editing `vgks.base.yaml` unless you want to change the global default for every domain
+- MuJoCo presets now also carry `env_name`, so using the matching dataset config avoids silently falling back to the toy evaluator
+
+For the current stability defaults, the repository now uses:
+
+- `sigma_tau: 0.01` to avoid exponential weight blow-up in sigma training
+- `sigma_warmup_steps: 1000` so value guidance does not dominate too early
+- `lambda_q: 0.02` for a more conservative start on MuJoCo datasets
 
 For actual experiments, prefer the environment-specific configs already provided, such as:
 

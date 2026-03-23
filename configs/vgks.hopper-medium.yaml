@@ -1,4 +1,5 @@
 base_config: vgks.mujoco.base.yaml
+env_name: hopper-medium-v2
 dataset_path: data/d4rl/hopper-medium-v2
 save_dir: runs/vgks/hopper-medium-v2/seed_0
 wandb_name: hopper-medium-seed0

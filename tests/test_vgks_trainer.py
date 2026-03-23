@@ -27,6 +27,7 @@ def build_trainer(lambda_q=0.1):
         sigma_model=sigma,
         critic=critic,
         action_dim=2,
+        sigma_tau=0.01,
         lambda_q=lambda_q,
         lambda_state_anchor=1.0,
         lambda_latent_anchor=0.1,
@@ -102,6 +103,18 @@ class VGKSTrainerTests(unittest.TestCase):
         after = trainer.sigma_model.sigma_layer.weight.detach()
 
         self.assertFalse(torch.allclose(before, after))
+
+    def test_sigma_loss_clamps_weight_exponent_to_avoid_overflow(self):
+        trainer = build_trainer()
+        batch = {
+            "observations": torch.full((2, 3), 1e6, dtype=torch.float32),
+            "next_observations": torch.full((2, 3), -1e6, dtype=torch.float32),
+        }
+
+        tensor_metrics = trainer.compute_sigma_loss_tensors(batch)
+
+        self.assertTrue(torch.isfinite(tensor_metrics["commutation_loss"]))
+        self.assertTrue(torch.isfinite(tensor_metrics["total_loss"]))
 
 
 if __name__ == "__main__":

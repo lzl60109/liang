@@ -75,6 +75,7 @@ def build_trainer_from_args(
     sigma_lr: float,
     kats_checkpoint: Optional[str],
     critic_checkpoint: Optional[str],
+    sigma_tau: float = 0.01,
     device: str = "cpu",
 ) -> ValueGuidedKoopmanTrainer:
     dynamics = KoopmanDynamicsModel(
@@ -106,6 +107,7 @@ def build_trainer_from_args(
         critic=critic,
         inverse_model=inverse_model,
         action_dim=action_dim,
+        sigma_tau=sigma_tau,
         lambda_q=lambda_q,
         lambda_state_anchor=lambda_state_anchor,
         lambda_latent_anchor=lambda_latent_anchor,
@@ -228,7 +230,14 @@ def run_training(
             num_workers=num_workers,
         )
 
-        policy_metrics = train_bc_epoch(policy, combined_loader, optimizer, device)
+        policy_metrics = train_bc_epoch(
+            policy,
+            combined_loader,
+            optimizer,
+            device,
+            epoch=epoch + 1,
+            total_epochs=epochs,
+        )
         if logger is not None:
             logger.log_metrics({f"policy/{k}": v for k, v in policy_metrics.items()}, step=epoch + 1)
 
@@ -352,6 +361,7 @@ def main() -> None:
         batch_size=None,
         epochs=None,
         sigma_lr=None,
+        sigma_tau=None,
         save_dir=None,
         seed=None,
         use_wandb=None,
@@ -400,6 +410,7 @@ def main() -> None:
         action_dim=action_dim,
         latent_dim=merged["latent_dim"],
         hidden_dim=merged["hidden_dim"],
+        sigma_tau=merged["sigma_tau"],
         lambda_q=merged["lambda_q"],
         lambda_state_anchor=merged["lambda_state_anchor"],
         lambda_latent_anchor=merged["lambda_latent_anchor"],

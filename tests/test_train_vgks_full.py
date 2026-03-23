@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -130,6 +131,73 @@ class VGKSFullTrainingTests(unittest.TestCase):
 
             self.assertTrue((save_root / "seed_0" / "eval.json").exists())
             self.assertTrue((save_root / "seed_1" / "eval.json").exists())
+
+    def test_vgks_run_passes_real_epoch_numbers_to_bc_training(self):
+        observations = np.random.randn(16, 3).astype(np.float32)
+        actions = np.random.randn(16, 2).astype(np.float32)
+        next_observations = np.random.randn(16, 3).astype(np.float32)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            dataset_path = tmpdir / "dataset.npz"
+            np.savez(
+                dataset_path,
+                observations=observations,
+                actions=actions,
+                next_observations=next_observations,
+            )
+
+            trainer = build_trainer_from_args(
+                state_dim=3,
+                action_dim=2,
+                latent_dim=4,
+                hidden_dim=8,
+                lambda_q=0.1,
+                lambda_state_anchor=1.0,
+                lambda_latent_anchor=0.1,
+                q_clip_min=-20.0,
+                q_clip_max=20.0,
+                sigma_warmup_steps=0,
+                sigma_lr=1e-2,
+                kats_checkpoint=None,
+                critic_checkpoint=None,
+                device="cpu",
+                sigma_tau=0.01,
+            )
+
+            calls = []
+
+            def fake_train_bc_epoch(policy, loader, optimizer, device, *, epoch=1, total_epochs=1, log_every=0):
+                calls.append((epoch, total_epochs))
+                return {"bc_loss": 0.0, "step_count": len(loader)}
+
+            with patch("vgks.train_vgks.train_bc_epoch", side_effect=fake_train_bc_epoch):
+                history = run_training(
+                    trainer=trainer,
+                    dataset_path=dataset_path,
+                    env_name=None,
+                    batch_size=4,
+                    epochs=3,
+                    shuffle=False,
+                    num_workers=0,
+                    save_dir=tmpdir / "runs" / "vgks" / "toy-env" / "seed_0",
+                    state_dim=3,
+                    action_dim=2,
+                    hidden_dim=8,
+                    seed=0,
+                    device="cpu",
+                    use_wandb=False,
+                    wandb_project="vgks-tests",
+                    wandb_group="vgks",
+                    wandb_name="toy-vgks",
+                    eval_episodes=2,
+                    eval_interval=1,
+                    save_best=False,
+                    run_name="toy-run",
+                )
+
+            self.assertEqual(calls, [(1, 3), (2, 3), (3, 3)])
+            self.assertEqual(len(history["sigma_history"]), 3)
 
 
 if __name__ == "__main__":

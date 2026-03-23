@@ -3,6 +3,7 @@ import argparse
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Value-Guided Koopman Symmetry")
+    parser.add_argument("--sigma-tau", dest="sigma_tau", type=float, default=0.01)
     parser.add_argument("--lambda-q", dest="lambda_q", type=float, default=0.1)
     parser.add_argument(
         "--lambda-state-anchor",

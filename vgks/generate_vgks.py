@@ -92,6 +92,7 @@ def run_vgks_generation(
     action_dim: int,
     latent_dim: int,
     hidden_dim: int,
+    sigma_tau: float,
     batch_size: int,
     epochs: int,
     seed: int,
@@ -121,6 +122,7 @@ def run_vgks_generation(
         action_dim=action_dim,
         latent_dim=latent_dim,
         hidden_dim=hidden_dim,
+        sigma_tau=sigma_tau,
         lambda_q=lambda_q,
         lambda_state_anchor=lambda_state_anchor,
         lambda_latent_anchor=lambda_latent_anchor,
@@ -188,6 +190,7 @@ def main() -> None:
     parser.add_argument("--batch-size", dest="batch_size", type=int, default=None)
     parser.add_argument("--epochs", dest="epochs", type=int, default=None)
     parser.add_argument("--sigma-lr", dest="sigma_lr", type=float, default=None)
+    parser.add_argument("--sigma-tau", dest="sigma_tau", type=float, default=None)
     parser.add_argument("--save-dir", dest="save_dir", type=str, default=None)
     parser.add_argument("--seed", dest="seed", type=int, default=None)
     parser.add_argument("--device", dest="device", type=str, default=None)
@@ -234,6 +237,7 @@ def main() -> None:
         action_dim=action_dim,
         latent_dim=merged["latent_dim"],
         hidden_dim=merged["hidden_dim"],
+        sigma_tau=merged["sigma_tau"],
         batch_size=merged["batch_size"],
         epochs=merged["epochs"],
         seed=merged["seed"],

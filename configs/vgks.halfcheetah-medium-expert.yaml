@@ -1,4 +1,5 @@
 base_config: vgks.mujoco.base.yaml
+env_name: halfcheetah-medium-expert-v2
 dataset_path: data/d4rl/halfcheetah-medium-expert-v2
 save_dir: runs/vgks/halfcheetah-medium-expert-v2/seed_0
 wandb_name: halfcheetah-medium-expert-seed0

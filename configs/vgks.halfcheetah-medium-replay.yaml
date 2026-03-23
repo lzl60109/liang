@@ -1,4 +1,5 @@
 base_config: vgks.mujoco.base.yaml
+env_name: halfcheetah-medium-replay-v2
 dataset_path: data/d4rl/halfcheetah-medium-replay-v2
 save_dir: runs/vgks/halfcheetah-medium-replay-v2/seed_0
 wandb_name: halfcheetah-medium-replay-seed0

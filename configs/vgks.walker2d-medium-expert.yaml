@@ -1,4 +1,5 @@
 base_config: vgks.mujoco.base.yaml
+env_name: walker2d-medium-expert-v2
 dataset_path: data/d4rl/walker2d-medium-expert-v2
 save_dir: runs/vgks/walker2d-medium-expert-v2/seed_0
 wandb_name: walker2d-medium-expert-seed0

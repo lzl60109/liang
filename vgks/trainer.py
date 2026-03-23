@@ -91,7 +91,9 @@ class ValueGuidedKoopmanTrainer:
         z_t1 = self.dynamics.encode(next_observations)
         k_z_t = self.dynamics.predict_next_latent(z_t)
         error = z_t1 - k_z_t
-        weights = torch.exp(self.sigma_tau * torch.sum(error.detach() ** 2, dim=1, keepdim=True))
+        error_energy = torch.sum(error.detach() ** 2, dim=1, keepdim=True)
+        log_weights = torch.clamp(self.sigma_tau * error_energy, min=-10.0, max=10.0)
+        weights = torch.exp(log_weights)
 
         sigma_z_t = self.sigma_model(z_t)
         sigma_z_t1 = self.sigma_model(z_t1)
@@ -147,6 +149,7 @@ class ValueGuidedKoopmanTrainer:
         tensor_metrics = self.compute_sigma_loss_tensors(batch)
         self.sigma_optimizer.zero_grad()
         tensor_metrics["total_loss"].backward()
+        torch.nn.utils.clip_grad_norm_(self.sigma_model.parameters(), max_norm=10.0)
         self.sigma_optimizer.step()
         self._steps += 1
         return {

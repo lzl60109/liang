@@ -7,6 +7,7 @@ latent_dim: 32
 hidden_dim: 256
 batch_size: 256
 epochs: 20
+sigma_tau: 0.01
 sigma_lr: 0.001
 device: cuda:0
 num_workers: 4
@@ -17,12 +18,12 @@ wandb_group: vgks
 eval_episodes: 10
 eval_interval: 1
 save_best: true
-lambda_q: 0.1
+lambda_q: 0.02
 lambda_state_anchor: 1.0
 lambda_latent_anchor: 0.1
 q_clip_min: -20.0
 q_clip_max: 20.0
 q_threshold:
-sigma_warmup_steps: 0
+sigma_warmup_steps: 1000
 kats_checkpoint:
 critic_checkpoint:
