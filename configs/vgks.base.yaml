@@ -8,6 +8,13 @@ hidden_dim: 256
 batch_size: 256
 epochs: 20
 sigma_tau: 0.01
+koopman_pretrain_epochs: 20
+critic_pretrain_epochs: 20
+koopman_lr: 0.001
+inverse_lr: 0.001
+critic_lr: 0.001
+critic_discount: 0.99
+cql_alpha: 1.0
 sigma_lr: 0.001
 device: cuda:0
 num_workers: 4

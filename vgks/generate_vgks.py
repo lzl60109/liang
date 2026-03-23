@@ -42,7 +42,15 @@ def _to_numpy_dict(batch_dict: Dict[str, torch.Tensor]) -> Dict[str, np.ndarray]
 
 def _concat_batches(batches):
     keys = batches[0].keys()
-    return {key: torch.cat([batch[key] for batch in batches], dim=0) for key in keys}
+    merged = {}
+    for key in keys:
+        values = [batch[key] for batch in batches]
+        first = values[0]
+        if isinstance(first, torch.Tensor):
+            merged[key] = torch.cat(values, dim=0)
+        else:
+            merged[key] = sum(int(value) for value in values)
+    return merged
 
 
 def generate_augmented_dataset(
@@ -53,6 +61,7 @@ def generate_augmented_dataset(
     batch_size: int,
     epochs: int,
     num_workers: int = 0,
+    q_threshold: Optional[float] = None,
 ) -> Dict[str, torch.Tensor]:
     if dataset_path is not None:
         data = load_offline_dataset(dataset_path)
@@ -68,7 +77,7 @@ def generate_augmented_dataset(
 
     augmented_batches = []
     for batch in eval_loader:
-        augmented = trainer.augment_batch(batch)
+        augmented = trainer.augment_batch(batch, q_threshold=q_threshold)
         augmented_batches.append(augmented)
 
     return _concat_batches(augmented_batches)
@@ -79,8 +88,9 @@ def save_generated_dataset(output_dir: Path, dataset_name: str, augmented: Dict[
     output_dir.mkdir(parents=True, exist_ok=True)
     prefix = output_dir / dataset_name
     arrays = _to_numpy_dict(augmented)
-    np.savez(prefix.with_suffix(".npz"), **arrays)
-    save_trajectory_paths(output_dir, dataset_name, replay_to_trajectory_list(arrays))
+    transition_arrays = {key: value for key, value in arrays.items() if np.asarray(value).ndim > 0}
+    np.savez(prefix.with_suffix(".npz"), **transition_arrays)
+    save_trajectory_paths(output_dir, dataset_name, replay_to_trajectory_list(transition_arrays))
     return prefix
 
 
@@ -112,6 +122,7 @@ def run_vgks_generation(
     sigma_lr: float = 1e-3,
     kats_checkpoint: Optional[str] = None,
     critic_checkpoint: Optional[str] = None,
+    q_threshold: Optional[float] = None,
     run_name: Optional[str] = None,
 ) -> Dict[str, object]:
     torch.manual_seed(seed)
@@ -163,12 +174,14 @@ def run_vgks_generation(
         batch_size=batch_size,
         epochs=epochs,
         num_workers=num_workers,
+        q_threshold=q_threshold,
     )
 
     dataset_name = run_name or (env_name if env_name is not None else "augmented_dataset")
     prefix = save_generated_dataset(save_dir, dataset_name, augmented)
     metrics = {
         "num_samples": int(augmented["observations"].shape[0]),
+        "num_kept": int(augmented.get("num_kept", augmented["observations"].shape[0])),
         "output_prefix": str(prefix),
     }
     logger.write_eval(metrics)
@@ -257,6 +270,7 @@ def main() -> None:
         sigma_lr=merged["sigma_lr"],
         kats_checkpoint=merged.get("kats_checkpoint"),
         critic_checkpoint=merged.get("critic_checkpoint"),
+        q_threshold=merged.get("q_threshold"),
         run_name=merged.get("run_name"),
     )
     print(json.dumps(metrics, indent=2))

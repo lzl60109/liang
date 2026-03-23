@@ -57,6 +57,31 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(torch.allclose(critic.q1_net.network[0].weight, q1_state["network.0.weight"]))
         self.assertTrue(torch.allclose(critic.q2_net.network[0].weight, q2_state["network.0.weight"]))
 
+    def test_load_tgcvg_checkpoint_accepts_nested_critic_state(self):
+        critic = ConservativeCritic(state_dim=3, action_dim=2, hidden_dim=8)
+        critic_state = critic.state_dict()
+        critic_state = {key: torch.full_like(value, 0.2) for key, value in critic_state.items()}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "critic_nested.pt"
+            torch.save({"critic": critic_state}, path)
+            load_tgcvg_critic_checkpoint(critic, path)
+
+        self.assertTrue(torch.allclose(critic.q1_net.network[0].weight, critic_state["q1_net.network.0.weight"]))
+        self.assertTrue(torch.allclose(critic.q2_net.network[0].weight, critic_state["q2_net.network.0.weight"]))
+
+    def test_load_kats_checkpoint_accepts_nested_kats_state(self):
+        dynamics = KoopmanDynamicsModel(state_dim=3, action_dim=2, latent_dim=4, hidden_dim=6)
+        dynamics_state = {key: torch.full_like(value, 0.13) for key, value in dynamics.state_dict().items()}
+        sigma_state = SigmaModel(latent_dim=4).state_dict()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "kats_nested.pt"
+            torch.save({"kats": {"dynamics": dynamics_state, "sigma_model": sigma_state}}, path)
+            load_kats_checkpoint(dynamics, path)
+
+        self.assertTrue(torch.allclose(dynamics.layer1.weight, dynamics_state["layer1.weight"]))
+
     def test_load_kats_checkpoint_can_restore_inverse_model(self):
         dynamics = KoopmanDynamicsModel(state_dim=3, action_dim=2, latent_dim=4, hidden_dim=6)
         inverse_model = InverseDynamicsModel(latent_dim=4, action_dim=2, hidden_dim=6)

@@ -53,15 +53,15 @@ There are two ways to use this repo.
 
 Use this when you want the method to match the intended idea most closely.
 
-1. Train or prepare a `KATS` checkpoint.
-2. Train or prepare a conservative critic checkpoint.
+1. Run `train_vgks.py` to train Koopman dynamics, inverse dynamics, a conservative critic, and the value-guided sigma model.
+2. Reuse the produced `kats_checkpoint.pt` and `critic_checkpoint.pt`.
 3. Run `generate_vgks.py` with those checkpoints to synthesize augmented transitions.
 4. Train `TD3BC`, `IQL`, `CQL`, or `BC` on raw-only or raw-plus-augmented data.
 
 In this mode:
 
 - `kats_checkpoint` provides pretrained Koopman dynamics and inverse dynamics
-- `critic_checkpoint` provides the value guidance used during augmentation
+- `critic_checkpoint` provides the conservative value guidance used during augmentation
 
 ### Shortcut Pipeline
 
@@ -80,9 +80,9 @@ This shortcut is the path you used for the earlier locomotion experiments.
 
 ## Stage 1: Prepare Checkpoints
 
-### 1A. Train `KATS`
+### 1A. Unified Upstream Training
 
-Use [train_kats.py](/H:/codex_test/nips2026/vgks/train_kats.py) to train Koopman dynamics on the target dataset.
+Use [train_vgks.py](/H:/codex_test/nips2026/vgks/train_vgks.py) to train the full upstream stack on the target dataset.
 
 Important:
 
@@ -95,7 +95,8 @@ Important:
 Example:
 
 ```console
-python vgks/train_kats.py ^
+python vgks/train_vgks.py ^
+  --config configs/vgks.halfcheetah-medium-expert.yaml ^
   --dataset-path data/d4rl/halfcheetah-medium-expert-v2 ^
   --save-dir runs/kats/halfcheetah-medium-expert-v2/seed_0 ^
   --device cuda:0
@@ -103,23 +104,12 @@ python vgks/train_kats.py ^
 
 What you need from this stage:
 
-- a checkpoint containing Koopman dynamics
-- ideally the trained `inverse_model` as well
+- `kats_checkpoint.pt`
+- `critic_checkpoint.pt`
+- `vgks_checkpoint.pt`
+- `best_checkpoint.pt`, `last_checkpoint.pt`, `checkpoint.pt`
 
-This checkpoint is later passed to `VGKS` as `kats_checkpoint`.
-
-### 1B. Train a Conservative Critic
-
-The repository expects a critic checkpoint that can be loaded into the `VGKS` critic for value guidance.
-
-In practice, this should come from a conservative offline RL model trained on the same environment.
-
-This checkpoint is later passed to `VGKS` as `critic_checkpoint`.
-
-Important:
-
-- `kats_checkpoint` and `critic_checkpoint` are not created by `train_td3bc.py` or `train_iql.py`
-- they are inputs to the augmentation stage, not outputs of the final evaluation stage
+The first two checkpoints are later passed to `generate_vgks.py` as `kats_checkpoint` and `critic_checkpoint`.
 
 ## Stage 2: Generate Augmented Data
 
@@ -224,7 +214,7 @@ python train_iql.py ^
 python train_cql.py --config configs/offline_rl/cql.yaml
 ```
 
-At the moment, `CQL` is primarily used with a single dataset path. Extend it in the same style as `TD3BC/IQL` if you want mixed raw-plus-augmented experiments.
+`CQL` supports the same raw-plus-augmented mixing interface as `TD3BC/IQL`.
 
 ### BC
 

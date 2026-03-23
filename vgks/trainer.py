@@ -210,4 +210,5 @@ class ValueGuidedKoopmanTrainer:
                 "actions": augmented_actions[mask].detach().cpu(),
                 "next_observations": augmented_next_states[mask].detach().cpu(),
                 "q_values": q_values[mask].detach().cpu(),
+                "num_kept": int(mask.sum().detach().cpu().item()),
             }

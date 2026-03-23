@@ -69,8 +69,18 @@ class VGKSFullTrainingTests(unittest.TestCase):
             self.assertTrue((save_dir / "eval_history.json").exists())
             self.assertTrue((save_dir / "best_checkpoint.pt").exists())
             self.assertTrue((save_dir / "last_checkpoint.pt").exists())
+            self.assertTrue((save_dir / "kats_checkpoint.pt").exists())
+            self.assertTrue((save_dir / "critic_checkpoint.pt").exists())
+            self.assertTrue((save_dir / "vgks_checkpoint.pt").exists())
             self.assertGreaterEqual(len(history["eval_history"]), 3)
             self.assertIn("best_normalized_score", history)
+            self.assertIn("koopman_history", history)
+            self.assertIn("critic_history", history)
+            self.assertIn("sigma_history", history)
+            self.assertIn("checkpoints", history)
+            self.assertEqual(history["checkpoints"]["kats"], str(save_dir / "kats_checkpoint.pt"))
+            self.assertEqual(history["checkpoints"]["critic"], str(save_dir / "critic_checkpoint.pt"))
+            self.assertEqual(history["checkpoints"]["vgks"], str(save_dir / "vgks_checkpoint.pt"))
 
     def test_vgks_run_supports_multiple_seeds(self):
         observations = np.random.randn(8, 3).astype(np.float32)
@@ -131,6 +141,8 @@ class VGKSFullTrainingTests(unittest.TestCase):
 
             self.assertTrue((save_root / "seed_0" / "eval.json").exists())
             self.assertTrue((save_root / "seed_1" / "eval.json").exists())
+            self.assertTrue((save_root / "seed_0" / "kats_checkpoint.pt").exists())
+            self.assertTrue((save_root / "seed_1" / "critic_checkpoint.pt").exists())
 
     def test_vgks_run_passes_real_epoch_numbers_to_bc_training(self):
         observations = np.random.randn(16, 3).astype(np.float32)
