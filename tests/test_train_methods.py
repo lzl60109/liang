@@ -149,6 +149,35 @@ class MethodTrainingTests(unittest.TestCase):
             self.assertTrue(np.allclose(sources["critic_data"]["observations"], 0.0))
             self.assertEqual(int((sources["actor_data"]["observations"] == 1.0).all(axis=1).sum()), 2)
 
+    def test_build_td3bc_dataset_prefers_top_q_augmented_samples(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            raw_path = tmpdir / "raw.npz"
+            aug_path = tmpdir / "aug.npz"
+            np.savez(
+                raw_path,
+                observations=np.zeros((10, 3), dtype=np.float32),
+                actions=np.zeros((10, 2), dtype=np.float32),
+                next_observations=np.zeros((10, 3), dtype=np.float32),
+                rewards=np.zeros(10, dtype=np.float32),
+                terminals=np.zeros(10, dtype=np.float32),
+            )
+            aug_obs = np.arange(8 * 3, dtype=np.float32).reshape(8, 3)
+            np.savez(
+                aug_path,
+                observations=aug_obs,
+                actions=np.ones((8, 2), dtype=np.float32),
+                next_observations=np.ones((8, 3), dtype=np.float32),
+                q_values=np.array([0.1, 0.2, 0.9, 0.8, 0.3, 0.4, 0.95, 0.7], dtype=np.float32),
+            )
+
+            data = build_td3bc_training_data(raw_dataset_path=raw_path, aug_dataset_path=aug_path, mix_aug_ratio=0.2, seed=0)
+
+            kept_aug = data["observations"][10:]
+            self.assertEqual(kept_aug.shape[0], 2)
+            self.assertTrue(any(np.allclose(row, aug_obs[6]) for row in kept_aug))
+            self.assertTrue(any(np.allclose(row, aug_obs[2]) for row in kept_aug))
+
     def test_td3bc_config_includes_aug_mixture_fields(self):
         config = yaml.safe_load((REPO_ROOT / "configs" / "offline_rl" / "td3bc.yaml").read_text(encoding="utf-8"))
 

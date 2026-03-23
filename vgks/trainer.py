@@ -18,6 +18,8 @@ class SigmaLossMetrics:
     latent_anchor_loss: float
     mean_conservative_q: float
     mean_conservative_q_unclipped: float
+    mean_advantage: float
+    mean_state_shift: float
 
     def to_dict(self) -> Dict[str, float]:
         return {
@@ -28,6 +30,8 @@ class SigmaLossMetrics:
             "latent_anchor_loss": self.latent_anchor_loss,
             "mean_conservative_q": self.mean_conservative_q,
             "mean_conservative_q_unclipped": self.mean_conservative_q_unclipped,
+            "mean_advantage": self.mean_advantage,
+            "mean_state_shift": self.mean_state_shift,
         }
 
 
@@ -46,6 +50,10 @@ class ValueGuidedKoopmanTrainer:
         q_clip_min: float = -20.0,
         q_clip_max: float = 20.0,
         sigma_warmup_steps: int = 0,
+        q_delta: Optional[float] = None,
+        max_state_shift: Optional[float] = None,
+        commute_horizon: int = 1,
+        value_temperature: float = 1.0,
         sigma_lr: float = 1e-3,
         device: Optional[torch.device] = None,
     ) -> None:
@@ -65,6 +73,10 @@ class ValueGuidedKoopmanTrainer:
         self.q_clip_min = q_clip_min
         self.q_clip_max = q_clip_max
         self.sigma_warmup_steps = sigma_warmup_steps
+        self.q_delta = q_delta
+        self.max_state_shift = max_state_shift
+        self.commute_horizon = max(1, int(commute_horizon))
+        self.value_temperature = max(float(value_temperature), 1e-6)
         self._steps = 0
         self.sigma_optimizer = torch.optim.Adam(self.sigma_model.parameters(), lr=sigma_lr)
 
@@ -88,6 +100,11 @@ class ValueGuidedKoopmanTrainer:
     def compute_sigma_loss_tensors(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         observations = self._to_tensor(batch["observations"])
         next_observations = self._to_tensor(batch["next_observations"])
+        raw_actions = (
+            self._to_tensor(batch["actions"])
+            if batch.get("actions") is not None
+            else None
+        )
 
         z_t = self.dynamics.encode(observations)
         z_t1 = self.dynamics.encode(next_observations)
@@ -99,25 +116,38 @@ class ValueGuidedKoopmanTrainer:
 
         sigma_z_t = self.sigma_model(z_t)
         sigma_z_t1 = self.sigma_model(z_t1)
-
-        k_sigma_z_t = self.dynamics.predict_next_latent(sigma_z_t)
-        sigma_loss_vec = k_sigma_z_t - sigma_z_t1
-        commutation_loss = F.mse_loss(weights * sigma_loss_vec, torch.zeros_like(sigma_loss_vec))
+        multi_step_losses = []
+        current_sigma = sigma_z_t
+        current_target = sigma_z_t1
+        for _ in range(self.commute_horizon):
+            predicted_sigma = self.dynamics.predict_next_latent(current_sigma)
+            multi_step_losses.append(
+                F.mse_loss(weights * (predicted_sigma - current_target), torch.zeros_like(predicted_sigma))
+            )
+            current_sigma = predicted_sigma
+            current_target = self.dynamics.predict_next_latent(current_target)
+        commutation_loss = torch.stack(multi_step_losses).mean()
 
         augmented_states = self.dynamics.decode(sigma_z_t)
         augmented_next_states = self.dynamics.decode(sigma_z_t1)
         augmented_actions = self.inverse_model(sigma_z_t, sigma_z_t1)
 
-        conservative_q = self.critic.conservative_value(augmented_states, augmented_actions)
-        unclipped_conservative_q = conservative_q
-        conservative_q = torch.clamp(unclipped_conservative_q, min=self.q_clip_min, max=self.q_clip_max)
-        value_loss = -conservative_q.mean()
+        aug_q_unclipped = self.critic.conservative_value(augmented_states, augmented_actions)
+        if raw_actions is None:
+            raw_actions = self.inverse_model(z_t, z_t1)
+        raw_q_unclipped = self.critic.conservative_value(observations, raw_actions)
+        unclipped_advantage = aug_q_unclipped - raw_q_unclipped.detach()
+        normalized_advantage = unclipped_advantage / self.value_temperature
+        clipped_advantage = torch.clamp(normalized_advantage, min=self.q_clip_min, max=self.q_clip_max)
+        value_loss = -clipped_advantage.mean()
+        conservative_q = torch.clamp(aug_q_unclipped, min=self.q_clip_min, max=self.q_clip_max)
 
         state_anchor_loss = (
             F.mse_loss(augmented_states, observations)
             + F.mse_loss(augmented_next_states, next_observations)
         )
         latent_anchor_loss = F.mse_loss(sigma_z_t, z_t) + F.mse_loss(sigma_z_t1, z_t1)
+        state_shift = torch.norm(augmented_states - observations, dim=1)
 
         total_loss = (
             commutation_loss
@@ -133,7 +163,9 @@ class ValueGuidedKoopmanTrainer:
             "state_anchor_loss": state_anchor_loss,
             "latent_anchor_loss": latent_anchor_loss,
             "mean_conservative_q": conservative_q.mean(),
-            "mean_conservative_q_unclipped": unclipped_conservative_q.mean(),
+            "mean_conservative_q_unclipped": aug_q_unclipped.mean(),
+            "mean_advantage": unclipped_advantage.mean(),
+            "mean_state_shift": state_shift.mean(),
         }
 
     def compute_sigma_loss(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
@@ -147,6 +179,8 @@ class ValueGuidedKoopmanTrainer:
             latent_anchor_loss=float(tensor_metrics["latent_anchor_loss"].detach().cpu().item()),
             mean_conservative_q=float(tensor_metrics["mean_conservative_q"].detach().cpu().item()),
             mean_conservative_q_unclipped=float(tensor_metrics["mean_conservative_q_unclipped"].detach().cpu().item()),
+            mean_advantage=float(tensor_metrics["mean_advantage"].detach().cpu().item()),
+            mean_state_shift=float(tensor_metrics["mean_state_shift"].detach().cpu().item()),
         ).to_dict()
 
     def train_sigma_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
@@ -170,6 +204,8 @@ class ValueGuidedKoopmanTrainer:
             "latent_anchor_loss": 0.0,
             "mean_conservative_q": 0.0,
             "mean_conservative_q_unclipped": 0.0,
+            "mean_advantage": 0.0,
+            "mean_state_shift": 0.0,
         }
         step_count = 0
         for batch in batches:
@@ -186,11 +222,20 @@ class ValueGuidedKoopmanTrainer:
         return averaged
 
     def augment_batch(
-        self, batch: Dict[str, torch.Tensor], q_threshold: Optional[float] = None
+        self,
+        batch: Dict[str, torch.Tensor],
+        q_threshold: Optional[float] = None,
+        q_delta: Optional[float] = None,
+        max_state_shift: Optional[float] = None,
     ) -> Dict[str, torch.Tensor]:
         with torch.no_grad():
             observations = self._to_tensor(batch["observations"])
             next_observations = self._to_tensor(batch["next_observations"])
+            raw_actions = (
+                self._to_tensor(batch["actions"])
+                if batch.get("actions") is not None
+                else None
+            )
 
             z_t = self.dynamics.encode(observations)
             z_t1 = self.dynamics.encode(next_observations)
@@ -200,21 +245,34 @@ class ValueGuidedKoopmanTrainer:
             augmented_states = self.dynamics.decode(sigma_z_t)
             augmented_next_states = self.dynamics.decode(sigma_z_t1)
             augmented_actions = self.inverse_model(sigma_z_t, sigma_z_t1)
+            unclipped_q_values = self.critic.conservative_value(augmented_states, augmented_actions)
             q_values = torch.clamp(
-                self.critic.conservative_value(augmented_states, augmented_actions),
+                unclipped_q_values,
                 min=self.q_clip_min,
                 max=self.q_clip_max,
             )
+            if raw_actions is None:
+                raw_actions = self.inverse_model(z_t, z_t1)
+            raw_q_values = self.critic.conservative_value(observations, raw_actions)
+            advantages = unclipped_q_values - raw_q_values
+            state_shift = torch.norm(augmented_states - observations, dim=1)
 
-            if q_threshold is None:
-                mask = torch.ones_like(q_values, dtype=torch.bool)
-            else:
-                mask = q_values >= q_threshold
+            mask = torch.ones_like(q_values, dtype=torch.bool)
+            effective_q_delta = self.q_delta if q_delta is None else q_delta
+            effective_max_state_shift = self.max_state_shift if max_state_shift is None else max_state_shift
+            if q_threshold is not None:
+                mask = mask & (q_values >= q_threshold)
+            if effective_q_delta is not None:
+                mask = mask & (advantages >= effective_q_delta)
+            if effective_max_state_shift is not None:
+                mask = mask & (state_shift <= effective_max_state_shift)
 
             return {
                 "observations": augmented_states[mask].detach().cpu(),
                 "actions": augmented_actions[mask].detach().cpu(),
                 "next_observations": augmented_next_states[mask].detach().cpu(),
                 "q_values": q_values[mask].detach().cpu(),
+                "advantages": advantages[mask].detach().cpu(),
+                "state_shift": state_shift[mask].detach().cpu(),
                 "num_kept": int(mask.sum().detach().cpu().item()),
             }

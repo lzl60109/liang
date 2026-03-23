@@ -295,6 +295,10 @@ def build_trainer_from_args(
     sigma_lr: float,
     kats_checkpoint: Optional[str],
     critic_checkpoint: Optional[str],
+    q_delta: Optional[float] = None,
+    max_state_shift: Optional[float] = None,
+    commute_horizon: int = 1,
+    value_temperature: float = 1.0,
     sigma_tau: float = 0.01,
     device: str = "cpu",
 ) -> ValueGuidedKoopmanTrainer:
@@ -321,6 +325,10 @@ def build_trainer_from_args(
         q_clip_min=q_clip_min,
         q_clip_max=q_clip_max,
         sigma_warmup_steps=sigma_warmup_steps,
+        q_delta=q_delta,
+        max_state_shift=max_state_shift,
+        commute_horizon=commute_horizon,
+        value_temperature=value_temperature,
         sigma_lr=sigma_lr,
         device=torch.device(device),
     )
@@ -642,6 +650,10 @@ def main() -> None:
         q_clip_min=None,
         q_clip_max=None,
         q_threshold=None,
+        q_delta=None,
+        max_state_shift=None,
+        commute_horizon=None,
+        value_temperature=None,
         sigma_warmup_steps=None,
         kats_checkpoint=None,
         critic_checkpoint=None,
@@ -682,6 +694,10 @@ def main() -> None:
         sigma_lr=merged["sigma_lr"],
         kats_checkpoint=merged.get("kats_checkpoint"),
         critic_checkpoint=merged.get("critic_checkpoint"),
+        q_delta=merged.get("q_delta", 0.0),
+        max_state_shift=merged.get("max_state_shift"),
+        commute_horizon=merged.get("commute_horizon", 1),
+        value_temperature=merged.get("value_temperature", 1.0),
         device=merged["device"],
     )
     metrics = run_training(

@@ -134,6 +134,28 @@ class VGKSTrainerTests(unittest.TestCase):
         self.assertIn("mean_conservative_q_unclipped", tensor_metrics)
         self.assertTrue(torch.isfinite(tensor_metrics["mean_conservative_q_unclipped"]))
 
+    def test_sigma_metrics_include_advantage_and_state_shift(self):
+        trainer = build_trainer()
+        metrics = trainer.compute_sigma_loss_tensors(make_batch())
+
+        self.assertIn("mean_advantage", metrics)
+        self.assertIn("mean_state_shift", metrics)
+        self.assertTrue(torch.isfinite(metrics["mean_advantage"]))
+        self.assertTrue(torch.isfinite(metrics["mean_state_shift"]))
+
+    def test_augment_batch_can_filter_by_advantage_and_state_shift(self):
+        trainer = build_trainer()
+        batch = {
+            "observations": torch.zeros(2, 3, dtype=torch.float32),
+            "actions": torch.zeros(2, 2, dtype=torch.float32),
+            "next_observations": torch.zeros(2, 3, dtype=torch.float32),
+        }
+
+        filtered = trainer.augment_batch(batch, q_threshold=None, q_delta=100.0, max_state_shift=0.01)
+
+        self.assertEqual(int(filtered["observations"].shape[0]), 0)
+        self.assertEqual(int(filtered["num_kept"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

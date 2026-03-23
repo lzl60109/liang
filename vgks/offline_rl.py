@@ -185,6 +185,30 @@ def _concat_array_dicts(left: Dict[str, np.ndarray], right: Dict[str, np.ndarray
     return merged
 
 
+def _select_augmented_subset(
+    aug_data: Dict[str, np.ndarray],
+    *,
+    take: int,
+    seed: int,
+) -> Dict[str, np.ndarray]:
+    if take <= 0:
+        return {key: None if value is None else np.asarray(value, dtype=np.float32)[:0] for key, value in aug_data.items()}
+
+    q_values = aug_data.get("q_values")
+    aug_size = int(aug_data["observations"].shape[0])
+    if q_values is not None:
+        scores = np.asarray(q_values, dtype=np.float32).reshape(-1)
+        indices = np.argsort(scores)[-take:]
+    else:
+        rng = np.random.default_rng(seed)
+        indices = rng.choice(aug_size, size=take, replace=False)
+
+    return {
+        key: None if value is None else np.asarray(value, dtype=np.float32)[indices]
+        for key, value in aug_data.items()
+    }
+
+
 def build_td3bc_training_data(
     *,
     dataset_path: Optional[Path] = None,
@@ -208,20 +232,23 @@ def build_td3bc_training_data(
         return raw_data
 
     aug_data = ensure_rewards_and_terminals(load_offline_dataset(aug_dataset_path))
-    aug_data = {key: value for key, value in aug_data.items() if key in TD3BC_TRANSITION_KEYS}
+    aug_data = {
+        key: value
+        for key, value in aug_data.items()
+        if key in TD3BC_TRANSITION_KEYS or key == "q_values"
+    }
     raw_size = int(raw_data["observations"].shape[0])
     aug_size = int(aug_data["observations"].shape[0])
     take = min(aug_size, int(round(raw_size * mix_aug_ratio)))
     if take <= 0:
         return raw_data
 
-    rng = np.random.default_rng(seed)
-    indices = rng.choice(aug_size, size=take, replace=False)
-    aug_subset = {
-        key: None if value is None else np.asarray(value, dtype=np.float32)[indices]
-        for key, value in aug_data.items()
-    }
-    return _concat_array_dicts(raw_data, aug_subset)
+    aug_subset = _select_augmented_subset(aug_data, take=take, seed=seed)
+    merged = _concat_array_dicts(
+        raw_data,
+        {key: value for key, value in aug_subset.items() if key in TD3BC_TRANSITION_KEYS},
+    )
+    return merged
 
 
 def build_td3bc_training_sources(

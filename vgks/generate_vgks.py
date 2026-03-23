@@ -62,6 +62,8 @@ def generate_augmented_dataset(
     epochs: int,
     num_workers: int = 0,
     q_threshold: Optional[float] = None,
+    q_delta: Optional[float] = None,
+    max_state_shift: Optional[float] = None,
 ) -> Dict[str, torch.Tensor]:
     if dataset_path is not None:
         data = load_offline_dataset(dataset_path)
@@ -77,7 +79,12 @@ def generate_augmented_dataset(
 
     augmented_batches = []
     for batch in eval_loader:
-        augmented = trainer.augment_batch(batch, q_threshold=q_threshold)
+        augmented = trainer.augment_batch(
+            batch,
+            q_threshold=q_threshold,
+            q_delta=q_delta,
+            max_state_shift=max_state_shift,
+        )
         augmented_batches.append(augmented)
 
     return _concat_batches(augmented_batches)
@@ -119,6 +126,10 @@ def run_vgks_generation(
     q_clip_min: float = -20.0,
     q_clip_max: float = 20.0,
     sigma_warmup_steps: int = 0,
+    q_delta: Optional[float] = None,
+    max_state_shift: Optional[float] = None,
+    commute_horizon: int = 1,
+    value_temperature: float = 1.0,
     sigma_lr: float = 1e-3,
     kats_checkpoint: Optional[str] = None,
     critic_checkpoint: Optional[str] = None,
@@ -143,6 +154,10 @@ def run_vgks_generation(
         sigma_lr=sigma_lr,
         kats_checkpoint=kats_checkpoint,
         critic_checkpoint=critic_checkpoint,
+        q_delta=q_delta,
+        max_state_shift=max_state_shift,
+        commute_horizon=commute_horizon,
+        value_temperature=value_temperature,
         device=device,
     )
 
@@ -164,6 +179,9 @@ def run_vgks_generation(
             "seed": seed,
             "device": device,
             "run_name": run_name,
+            "q_threshold": q_threshold,
+            "q_delta": q_delta,
+            "max_state_shift": max_state_shift,
         },
     )
 
@@ -175,13 +193,18 @@ def run_vgks_generation(
         epochs=epochs,
         num_workers=num_workers,
         q_threshold=q_threshold,
+        q_delta=q_delta,
+        max_state_shift=max_state_shift,
     )
 
     dataset_name = run_name or (env_name if env_name is not None else "augmented_dataset")
     prefix = save_generated_dataset(save_dir, dataset_name, augmented)
+    augmented_arrays = _to_numpy_dict(augmented)
     metrics = {
         "num_samples": int(augmented["observations"].shape[0]),
         "num_kept": int(augmented.get("num_kept", augmented["observations"].shape[0])),
+        "mean_advantage": float(np.asarray(augmented_arrays.get("advantages", np.array([0.0], dtype=np.float32))).mean()),
+        "mean_state_shift": float(np.asarray(augmented_arrays.get("state_shift", np.array([0.0], dtype=np.float32))).mean()),
         "output_prefix": str(prefix),
     }
     logger.write_eval(metrics)
@@ -221,6 +244,11 @@ def main() -> None:
     parser.add_argument("--sigma-warmup-steps", dest="sigma_warmup_steps", type=int, default=None)
     parser.add_argument("--kats-checkpoint", dest="kats_checkpoint", type=str, default=None)
     parser.add_argument("--critic-checkpoint", dest="critic_checkpoint", type=str, default=None)
+    parser.add_argument("--q-threshold", dest="q_threshold", type=float, default=None)
+    parser.add_argument("--q-delta", dest="q_delta", type=float, default=None)
+    parser.add_argument("--max-state-shift", dest="max_state_shift", type=float, default=None)
+    parser.add_argument("--commute-horizon", dest="commute_horizon", type=int, default=None)
+    parser.add_argument("--value-temperature", dest="value_temperature", type=float, default=None)
     parser.set_defaults(use_wandb=None)
     args = parser.parse_args()
 
@@ -271,6 +299,10 @@ def main() -> None:
         kats_checkpoint=merged.get("kats_checkpoint"),
         critic_checkpoint=merged.get("critic_checkpoint"),
         q_threshold=merged.get("q_threshold"),
+        q_delta=merged.get("q_delta"),
+        max_state_shift=merged.get("max_state_shift"),
+        commute_horizon=merged.get("commute_horizon", 1),
+        value_temperature=merged.get("value_temperature", 1.0),
         run_name=merged.get("run_name"),
     )
     print(json.dumps(metrics, indent=2))

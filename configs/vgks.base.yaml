@@ -35,6 +35,10 @@ lambda_latent_anchor: 0.1
 q_clip_min: -20.0
 q_clip_max: 20.0
 q_threshold:
+q_delta:
+max_state_shift:
+commute_horizon: 1
+value_temperature: 1.0
 sigma_warmup_steps: 1000
 kats_checkpoint:
 critic_checkpoint:
