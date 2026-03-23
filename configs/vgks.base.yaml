@@ -14,7 +14,11 @@ koopman_lr: 0.001
 inverse_lr: 0.001
 critic_lr: 0.001
 critic_discount: 0.99
-cql_alpha: 1.0
+critic_policy_lr: 0.0003
+critic_tau: 0.005
+critic_samples: 10
+cql_alpha: 5.0
+cql_temp: 1.0
 sigma_lr: 0.001
 device: cuda:0
 num_workers: 4

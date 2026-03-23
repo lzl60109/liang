@@ -78,9 +78,17 @@ class VGKSFullTrainingTests(unittest.TestCase):
             self.assertIn("critic_history", history)
             self.assertIn("sigma_history", history)
             self.assertIn("checkpoints", history)
+            self.assertIn("target_q_mean", history["critic_history"][-1])
+            self.assertIn("data_q_mean", history["critic_history"][-1])
+            self.assertIn("ood_q_mean", history["critic_history"][-1])
+            self.assertIn("cql_gap", history["critic_history"][-1])
             self.assertEqual(history["checkpoints"]["kats"], str(save_dir / "kats_checkpoint.pt"))
             self.assertEqual(history["checkpoints"]["critic"], str(save_dir / "critic_checkpoint.pt"))
             self.assertEqual(history["checkpoints"]["vgks"], str(save_dir / "vgks_checkpoint.pt"))
+            critic_checkpoint = __import__("torch").load(save_dir / "critic_checkpoint.pt", map_location="cpu")
+            critic_state = critic_checkpoint["critic_checkpoint"]
+            self.assertIn("critic1_target", critic_state)
+            self.assertIn("critic2_target", critic_state)
 
     def test_vgks_run_supports_multiple_seeds(self):
         observations = np.random.randn(8, 3).astype(np.float32)

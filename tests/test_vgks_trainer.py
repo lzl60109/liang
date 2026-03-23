@@ -125,6 +125,15 @@ class VGKSTrainerTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(tensor_metrics["commutation_loss"]))
         self.assertTrue(torch.isfinite(tensor_metrics["total_loss"]))
 
+    def test_sigma_guidance_preserves_unclipped_q_signal(self):
+        trainer = build_trainer()
+        batch = make_batch()
+
+        tensor_metrics = trainer.compute_sigma_loss_tensors(batch)
+
+        self.assertIn("mean_conservative_q_unclipped", tensor_metrics)
+        self.assertTrue(torch.isfinite(tensor_metrics["mean_conservative_q_unclipped"]))
+
 
 if __name__ == "__main__":
     unittest.main()

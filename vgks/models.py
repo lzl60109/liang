@@ -20,8 +20,18 @@ class QNetwork(nn.Module):
         )
 
     def forward(self, observations: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        multiple_actions = False
+        batch_size = observations.shape[0]
+        if actions.ndim == 3 and observations.ndim == 2:
+            multiple_actions = True
+            observations = observations.unsqueeze(1).expand(-1, actions.shape[1], -1)
+            observations = observations.reshape(-1, observations.shape[-1])
+            actions = actions.reshape(-1, actions.shape[-1])
         inputs = torch.cat([observations.float(), actions.float()], dim=1)
-        return self.network(inputs).reshape(-1)
+        values = self.network(inputs).reshape(-1)
+        if multiple_actions:
+            values = values.reshape(batch_size, -1)
+        return values
 
 
 class KoopmanDynamicsModel(nn.Module):

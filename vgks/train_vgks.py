@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import sys
 from pathlib import Path
@@ -77,6 +78,51 @@ def _make_eval_env(env_name: Optional[str], state_dim: int, action_dim: int):
     return make_env(env_name)
 
 
+def _soft_update_module(target: torch.nn.Module, source: torch.nn.Module, tau: float) -> None:
+    with torch.no_grad():
+        for target_param, source_param in zip(target.parameters(), source.parameters()):
+            target_param.data.mul_(1.0 - tau).add_(tau * source_param.data)
+
+
+def _policy_action(policy: BCPolicy, observations: torch.Tensor) -> torch.Tensor:
+    return torch.clamp(torch.tanh(policy(observations)), min=-1.0, max=1.0)
+
+
+def _sample_policy_actions(
+    policy: BCPolicy,
+    observations: torch.Tensor,
+    num_samples: int,
+    noise_std: float = 0.1,
+) -> torch.Tensor:
+    base_actions = _policy_action(policy, observations)
+    repeated = base_actions.unsqueeze(1).expand(-1, num_samples, -1)
+    noisy = repeated + noise_std * torch.randn_like(repeated)
+    return torch.clamp(noisy, min=-1.0, max=1.0)
+
+
+def _train_behavior_policy_epoch(
+    policy: BCPolicy,
+    loader,
+    optimizer: torch.optim.Optimizer,
+    device: str,
+) -> Dict[str, float]:
+    policy.train()
+    total_loss = 0.0
+    step_count = 0
+    for batch in loader:
+        observations = batch["observations"].to(device)
+        actions = torch.clamp(batch["actions"].to(device), min=-1.0, max=1.0)
+        predicted = _policy_action(policy, observations)
+        loss = F.mse_loss(predicted, actions)
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=10.0)
+        optimizer.step()
+        total_loss += float(loss.detach().cpu().item())
+        step_count += 1
+    return {"behavior_loss": total_loss / max(1, step_count), "step_count": step_count}
+
+
 def _train_koopman_epoch(
     dynamics: KoopmanDynamicsModel,
     inverse_model: InverseDynamicsModel,
@@ -125,53 +171,104 @@ def _train_koopman_epoch(
 
 def _train_conservative_critic_epoch(
     critic: ConservativeCritic,
+    target_critic: ConservativeCritic,
+    behavior_policy: BCPolicy,
     loader,
-    optimizer: torch.optim.Optimizer,
+    critic_optimizer: torch.optim.Optimizer,
+    behavior_optimizer: torch.optim.Optimizer,
     device: str,
     discount: float,
     cql_alpha: float,
+    tau: float,
+    num_action_samples: int,
+    cql_temp: float,
 ) -> Dict[str, float]:
+    behavior_metrics = _train_behavior_policy_epoch(behavior_policy, loader, behavior_optimizer, device)
     critic.train()
+    target_critic.eval()
     for param in critic.parameters():
         param.requires_grad_(True)
-    totals = {"critic_loss": 0.0, "bellman_loss": 0.0, "cql_loss": 0.0, "q_mean": 0.0, "step_count": 0}
+    totals = {
+        "critic_loss": 0.0,
+        "bellman_loss": 0.0,
+        "cql_loss": 0.0,
+        "q_mean": 0.0,
+        "target_q_mean": 0.0,
+        "data_q_mean": 0.0,
+        "ood_q_mean": 0.0,
+        "cql_gap": 0.0,
+        "step_count": 0,
+    }
     for batch in loader:
         observations = batch["observations"].to(device)
-        actions = batch["actions"].to(device)
+        actions = torch.clamp(batch["actions"].to(device), min=-1.0, max=1.0)
         next_observations = batch["next_observations"].to(device)
         rewards = batch["rewards"].to(device)
         terminals = batch["terminals"].to(device)
 
         with torch.no_grad():
-            next_actions = actions
-            target_q = rewards + (1.0 - terminals) * discount * critic.conservative_value(next_observations, next_actions)
+            next_actions = _policy_action(behavior_policy, next_observations)
+            target_q = rewards + (1.0 - terminals) * discount * target_critic.conservative_value(
+                next_observations, next_actions
+            )
 
         q1 = critic.q1(observations, actions)
         q2 = critic.q2(observations, actions)
         bellman_loss = F.mse_loss(q1, target_q) + F.mse_loss(q2, target_q)
 
-        random_actions = torch.empty_like(actions).uniform_(-1.0, 1.0)
-        cql_loss = (
-            critic.q1(observations, random_actions).mean()
-            + critic.q2(observations, random_actions).mean()
-            - q1.mean()
-            - q2.mean()
+        random_actions = torch.empty(
+            observations.shape[0], num_action_samples, actions.shape[-1], device=device
+        ).uniform_(-1.0, 1.0)
+        current_policy_actions = _sample_policy_actions(
+            behavior_policy, observations, num_samples=num_action_samples
         )
-        critic_loss = bellman_loss + cql_alpha * cql_loss
+        next_policy_actions = _sample_policy_actions(
+            behavior_policy, next_observations, num_samples=num_action_samples
+        )
 
-        optimizer.zero_grad()
+        q1_rand = critic.q1(observations, random_actions)
+        q2_rand = critic.q2(observations, random_actions)
+        q1_current = critic.q1(observations, current_policy_actions)
+        q2_current = critic.q2(observations, current_policy_actions)
+        q1_next = critic.q1(observations, next_policy_actions)
+        q2_next = critic.q2(observations, next_policy_actions)
+
+        q1_ood = torch.logsumexp(
+            torch.cat([q1_rand, q1_current, q1_next], dim=1) / cql_temp,
+            dim=1,
+        ) * cql_temp
+        q2_ood = torch.logsumexp(
+            torch.cat([q2_rand, q2_current, q2_next], dim=1) / cql_temp,
+            dim=1,
+        ) * cql_temp
+        cql_gap1 = q1_ood - q1
+        cql_gap2 = q2_ood - q2
+        cql_loss = cql_alpha * (cql_gap1.mean() + cql_gap2.mean())
+        critic_loss = bellman_loss + cql_loss
+
+        critic_optimizer.zero_grad()
         critic_loss.backward()
-        optimizer.step()
+        torch.nn.utils.clip_grad_norm_(critic.parameters(), max_norm=10.0)
+        critic_optimizer.step()
+        _soft_update_module(target_critic, critic, tau)
 
         totals["critic_loss"] += float(critic_loss.detach().cpu().item())
         totals["bellman_loss"] += float(bellman_loss.detach().cpu().item())
         totals["cql_loss"] += float(cql_loss.detach().cpu().item())
-        totals["q_mean"] += float(torch.minimum(q1, q2).mean().detach().cpu().item())
+        data_q_mean = torch.minimum(q1, q2).mean()
+        ood_q_mean = torch.minimum(q1_ood, q2_ood).mean()
+        target_q_mean = target_q.mean()
+        totals["q_mean"] += float(data_q_mean.detach().cpu().item())
+        totals["data_q_mean"] += float(data_q_mean.detach().cpu().item())
+        totals["ood_q_mean"] += float(ood_q_mean.detach().cpu().item())
+        totals["target_q_mean"] += float(target_q_mean.detach().cpu().item())
+        totals["cql_gap"] += float(((cql_gap1.mean() + cql_gap2.mean()) * 0.5).detach().cpu().item())
         totals["step_count"] += 1
 
     steps = max(1, totals["step_count"])
-    for key in ("critic_loss", "bellman_loss", "cql_loss", "q_mean"):
+    for key in ("critic_loss", "bellman_loss", "cql_loss", "q_mean", "target_q_mean", "data_q_mean", "ood_q_mean", "cql_gap"):
         totals[key] /= steps
+    totals["behavior_loss"] = behavior_metrics["behavior_loss"]
     return totals
 
 
@@ -252,6 +349,15 @@ def run_training(
     eval_interval: int = 1,
     save_best: bool = True,
     run_name: Optional[str] = None,
+    koopman_lr: float = 1e-3,
+    inverse_lr: float = 1e-3,
+    critic_lr: float = 1e-3,
+    critic_policy_lr: float = 3e-4,
+    critic_discount: float = 0.99,
+    critic_tau: float = 5e-3,
+    cql_alpha: float = 1.0,
+    critic_samples: int = 10,
+    cql_temp: float = 1.0,
 ) -> Dict[str, object]:
     if dataset_path is None and env_name is None:
         raise ValueError("run_training requires either dataset_path or env_name")
@@ -286,10 +392,17 @@ def run_training(
         )
 
     koopman_optimizer = torch.optim.Adam(
-        list(trainer.dynamics.parameters()) + list(trainer.inverse_model.parameters()),
-        lr=1e-3,
+        [
+            {"params": trainer.dynamics.parameters(), "lr": koopman_lr},
+            {"params": trainer.inverse_model.parameters(), "lr": inverse_lr},
+        ]
     )
-    critic_optimizer = torch.optim.Adam(trainer.critic.parameters(), lr=1e-3)
+    critic_optimizer = torch.optim.Adam(trainer.critic.parameters(), lr=critic_lr)
+    target_critic = deepcopy(trainer.critic).to(device)
+    for param in target_critic.parameters():
+        param.requires_grad_(False)
+    behavior_policy = BCPolicy(state_dim=state_dim, action_dim=action_dim, hidden_dim=hidden_dim).to(device)
+    behavior_optimizer = torch.optim.Adam(behavior_policy.parameters(), lr=critic_policy_lr)
 
     koopman_history: List[Dict[str, float]] = []
     critic_history: List[Dict[str, float]] = []
@@ -310,7 +423,18 @@ def run_training(
 
         critic_loader = build_dataloader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
         critic_metrics = _train_conservative_critic_epoch(
-            trainer.critic, critic_loader, critic_optimizer, device, discount=0.99, cql_alpha=1.0
+            trainer.critic,
+            target_critic,
+            behavior_policy,
+            critic_loader,
+            critic_optimizer,
+            behavior_optimizer,
+            device,
+            discount=critic_discount,
+            cql_alpha=cql_alpha,
+            tau=critic_tau,
+            num_action_samples=critic_samples,
+            cql_temp=cql_temp,
         )
         critic_history.append(critic_metrics)
 
@@ -400,7 +524,14 @@ def run_training(
             checkpoint_paths["kats"],
         )
         torch.save(
-            {"critic_checkpoint": {"critic": trainer.critic.state_dict()}},
+            {
+                "critic_checkpoint": {
+                    "critic": trainer.critic.state_dict(),
+                    "critic1_target": target_critic.q1_net.state_dict(),
+                    "critic2_target": target_critic.q2_net.state_dict(),
+                    "behavior_policy": behavior_policy.state_dict(),
+                }
+            },
             checkpoint_paths["critic"],
         )
         torch.save(
@@ -462,6 +593,15 @@ def main() -> None:
     parser.add_argument("--eval-interval", dest="eval_interval", type=int, default=1)
     parser.add_argument("--save-best", dest="save_best", action="store_true")
     parser.add_argument("--run-name", dest="run_name", type=str, default=None)
+    parser.add_argument("--koopman-lr", dest="koopman_lr", type=float, default=None)
+    parser.add_argument("--inverse-lr", dest="inverse_lr", type=float, default=None)
+    parser.add_argument("--critic-lr", dest="critic_lr", type=float, default=None)
+    parser.add_argument("--critic-policy-lr", dest="critic_policy_lr", type=float, default=None)
+    parser.add_argument("--critic-discount", dest="critic_discount", type=float, default=None)
+    parser.add_argument("--critic-tau", dest="critic_tau", type=float, default=None)
+    parser.add_argument("--critic-samples", dest="critic_samples", type=int, default=None)
+    parser.add_argument("--cql-alpha", dest="cql_alpha", type=float, default=None)
+    parser.add_argument("--cql-temp", dest="cql_temp", type=float, default=None)
     parser.set_defaults(
         dataset_path=None,
         env_name=None,
@@ -485,6 +625,15 @@ def main() -> None:
         eval_interval=None,
         save_best=None,
         run_name=None,
+        koopman_lr=None,
+        inverse_lr=None,
+        critic_lr=None,
+        critic_policy_lr=None,
+        critic_discount=None,
+        critic_tau=None,
+        critic_samples=None,
+        cql_alpha=None,
+        cql_temp=None,
         device=None,
         num_workers=None,
         lambda_q=None,
@@ -556,6 +705,15 @@ def main() -> None:
         eval_interval=merged["eval_interval"],
         save_best=bool(merged["save_best"]),
         run_name=merged.get("run_name"),
+        koopman_lr=merged["koopman_lr"],
+        inverse_lr=merged["inverse_lr"],
+        critic_lr=merged["critic_lr"],
+        critic_policy_lr=merged["critic_policy_lr"],
+        critic_discount=merged["critic_discount"],
+        critic_tau=merged["critic_tau"],
+        cql_alpha=merged["cql_alpha"],
+        critic_samples=merged["critic_samples"],
+        cql_temp=merged["cql_temp"],
     )
     print(json.dumps(metrics["last"], indent=2))
 

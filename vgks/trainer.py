@@ -17,6 +17,7 @@ class SigmaLossMetrics:
     state_anchor_loss: float
     latent_anchor_loss: float
     mean_conservative_q: float
+    mean_conservative_q_unclipped: float
 
     def to_dict(self) -> Dict[str, float]:
         return {
@@ -26,6 +27,7 @@ class SigmaLossMetrics:
             "state_anchor_loss": self.state_anchor_loss,
             "latent_anchor_loss": self.latent_anchor_loss,
             "mean_conservative_q": self.mean_conservative_q,
+            "mean_conservative_q_unclipped": self.mean_conservative_q_unclipped,
         }
 
 
@@ -107,7 +109,8 @@ class ValueGuidedKoopmanTrainer:
         augmented_actions = self.inverse_model(sigma_z_t, sigma_z_t1)
 
         conservative_q = self.critic.conservative_value(augmented_states, augmented_actions)
-        conservative_q = torch.clamp(conservative_q, min=self.q_clip_min, max=self.q_clip_max)
+        unclipped_conservative_q = conservative_q
+        conservative_q = torch.clamp(unclipped_conservative_q, min=self.q_clip_min, max=self.q_clip_max)
         value_loss = -conservative_q.mean()
 
         state_anchor_loss = (
@@ -130,6 +133,7 @@ class ValueGuidedKoopmanTrainer:
             "state_anchor_loss": state_anchor_loss,
             "latent_anchor_loss": latent_anchor_loss,
             "mean_conservative_q": conservative_q.mean(),
+            "mean_conservative_q_unclipped": unclipped_conservative_q.mean(),
         }
 
     def compute_sigma_loss(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
@@ -142,6 +146,7 @@ class ValueGuidedKoopmanTrainer:
             state_anchor_loss=float(tensor_metrics["state_anchor_loss"].detach().cpu().item()),
             latent_anchor_loss=float(tensor_metrics["latent_anchor_loss"].detach().cpu().item()),
             mean_conservative_q=float(tensor_metrics["mean_conservative_q"].detach().cpu().item()),
+            mean_conservative_q_unclipped=float(tensor_metrics["mean_conservative_q_unclipped"].detach().cpu().item()),
         ).to_dict()
 
     def train_sigma_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
@@ -164,6 +169,7 @@ class ValueGuidedKoopmanTrainer:
             "state_anchor_loss": 0.0,
             "latent_anchor_loss": 0.0,
             "mean_conservative_q": 0.0,
+            "mean_conservative_q_unclipped": 0.0,
         }
         step_count = 0
         for batch in batches:

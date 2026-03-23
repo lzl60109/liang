@@ -283,6 +283,16 @@ For the current stability defaults, the repository now uses:
 - `sigma_tau: 0.01` to avoid exponential weight blow-up in sigma training
 - `sigma_warmup_steps: 1000` so value guidance does not dominate too early
 - `lambda_q: 0.02` for a more conservative start on MuJoCo datasets
+- a CQL-style critic stage with target critics, behavior-policy backups, and conservative logsumexp regularization
+
+When checking critic health during `train_vgks.py`, the most useful metrics are:
+
+- `critic/target_q_mean`
+- `critic/data_q_mean`
+- `critic/ood_q_mean`
+- `critic/cql_gap`
+
+If `critic/data_q_mean` immediately collapses to very large negative values and `sigma/mean_conservative_q` stays pinned at the clip floor, the value guidance is still not healthy.
 
 For actual experiments, prefer the environment-specific configs already provided, such as:
 
