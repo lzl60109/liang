@@ -306,6 +306,22 @@ These configs inherit from base files such as:
 - [configs/vgks.maze2d.base.yaml](/H:/codex_test/nips2026/configs/vgks.maze2d.base.yaml)
 - [configs/vgks.adroit.base.yaml](/H:/codex_test/nips2026/configs/vgks.adroit.base.yaml)
 
+### Paper Baseline Configs
+
+If you are validating augmentation with the stronger reference-style `TD3BC` and `IQL` scripts, use:
+
+- [configs/offline_rl/td3bc_base.yaml](/H:/codex_test/nips2026/configs/offline_rl/td3bc_base.yaml)
+- [configs/offline_rl/iql_base.yaml](/H:/codex_test/nips2026/configs/offline_rl/iql_base.yaml)
+
+These are intended for baseline verification with:
+
+- `raw_dataset_path`
+- `aug_dataset_path`
+- `mix_aug_ratio`
+- `aug_take_topq`
+
+The expectation is that the script itself preserves its original algorithm logic, while the dataset path layer is switched to your raw-plus-augmented trajectory pipeline.
+
 ### `kats_checkpoint` and `critic_checkpoint`
 
 These are optional in code, but important in the full method.
