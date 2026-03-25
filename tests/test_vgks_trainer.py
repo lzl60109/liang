@@ -30,6 +30,7 @@ def build_trainer(lambda_q=0.1):
         sigma_tau=0.01,
         lambda_q=lambda_q,
         lambda_state_anchor=1.0,
+        lambda_action_anchor=0.5,
         lambda_latent_anchor=0.1,
         q_clip_min=-20.0,
         q_clip_max=20.0,
@@ -143,6 +144,18 @@ class VGKSTrainerTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(metrics["mean_advantage"]))
         self.assertTrue(torch.isfinite(metrics["mean_state_shift"]))
 
+    def test_sigma_metrics_include_action_consistency_terms(self):
+        trainer = build_trainer()
+        batch = make_batch()
+        batch["actions"] = torch.tensor([[0.1, -0.2], [0.0, 0.3]], dtype=torch.float32)
+
+        metrics = trainer.compute_sigma_loss_tensors(batch)
+
+        self.assertIn("action_anchor_loss", metrics)
+        self.assertIn("mean_action_deviation", metrics)
+        self.assertTrue(torch.isfinite(metrics["action_anchor_loss"]))
+        self.assertTrue(torch.isfinite(metrics["mean_action_deviation"]))
+
     def test_augment_batch_can_filter_by_advantage_and_state_shift(self):
         trainer = build_trainer()
         batch = {
@@ -152,6 +165,19 @@ class VGKSTrainerTests(unittest.TestCase):
         }
 
         filtered = trainer.augment_batch(batch, q_threshold=None, q_delta=100.0, max_state_shift=0.01)
+
+        self.assertEqual(int(filtered["observations"].shape[0]), 0)
+        self.assertEqual(int(filtered["num_kept"]), 0)
+
+    def test_augment_batch_can_filter_by_action_deviation(self):
+        trainer = build_trainer()
+        batch = {
+            "observations": torch.zeros(2, 3, dtype=torch.float32),
+            "actions": torch.zeros(2, 2, dtype=torch.float32),
+            "next_observations": torch.zeros(2, 3, dtype=torch.float32),
+        }
+
+        filtered = trainer.augment_batch(batch, max_action_deviation=0.0)
 
         self.assertEqual(int(filtered["observations"].shape[0]), 0)
         self.assertEqual(int(filtered["num_kept"]), 0)

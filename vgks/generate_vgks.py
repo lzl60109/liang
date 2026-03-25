@@ -64,6 +64,7 @@ def generate_augmented_dataset(
     q_threshold: Optional[float] = None,
     q_delta: Optional[float] = None,
     max_state_shift: Optional[float] = None,
+    max_action_deviation: Optional[float] = None,
 ) -> Dict[str, torch.Tensor]:
     if dataset_path is not None:
         data = load_offline_dataset(dataset_path)
@@ -84,6 +85,7 @@ def generate_augmented_dataset(
             q_threshold=q_threshold,
             q_delta=q_delta,
             max_state_shift=max_state_shift,
+            max_action_deviation=max_action_deviation,
         )
         augmented_batches.append(augmented)
 
@@ -122,12 +124,14 @@ def run_vgks_generation(
     num_workers: int = 0,
     lambda_q: float = 0.1,
     lambda_state_anchor: float = 1.0,
+    lambda_action_anchor: float = 1.0,
     lambda_latent_anchor: float = 0.1,
     q_clip_min: float = -20.0,
     q_clip_max: float = 20.0,
     sigma_warmup_steps: int = 0,
     q_delta: Optional[float] = None,
     max_state_shift: Optional[float] = None,
+    max_action_deviation: Optional[float] = None,
     commute_horizon: int = 1,
     value_temperature: float = 1.0,
     sigma_lr: float = 1e-3,
@@ -147,6 +151,7 @@ def run_vgks_generation(
         sigma_tau=sigma_tau,
         lambda_q=lambda_q,
         lambda_state_anchor=lambda_state_anchor,
+        lambda_action_anchor=lambda_action_anchor,
         lambda_latent_anchor=lambda_latent_anchor,
         q_clip_min=q_clip_min,
         q_clip_max=q_clip_max,
@@ -156,6 +161,7 @@ def run_vgks_generation(
         critic_checkpoint=critic_checkpoint,
         q_delta=q_delta,
         max_state_shift=max_state_shift,
+        max_action_deviation=max_action_deviation,
         commute_horizon=commute_horizon,
         value_temperature=value_temperature,
         device=device,
@@ -182,6 +188,7 @@ def run_vgks_generation(
             "q_threshold": q_threshold,
             "q_delta": q_delta,
             "max_state_shift": max_state_shift,
+            "max_action_deviation": max_action_deviation,
         },
     )
 
@@ -195,6 +202,7 @@ def run_vgks_generation(
         q_threshold=q_threshold,
         q_delta=q_delta,
         max_state_shift=max_state_shift,
+        max_action_deviation=max_action_deviation,
     )
 
     dataset_name = run_name or (env_name if env_name is not None else "augmented_dataset")
@@ -205,6 +213,7 @@ def run_vgks_generation(
         "num_kept": int(augmented.get("num_kept", augmented["observations"].shape[0])),
         "mean_advantage": float(np.asarray(augmented_arrays.get("advantages", np.array([0.0], dtype=np.float32))).mean()),
         "mean_state_shift": float(np.asarray(augmented_arrays.get("state_shift", np.array([0.0], dtype=np.float32))).mean()),
+        "mean_action_deviation": float(np.asarray(augmented_arrays.get("action_deviation", np.array([0.0], dtype=np.float32))).mean()),
         "output_prefix": str(prefix),
     }
     logger.write_eval(metrics)
@@ -238,6 +247,7 @@ def main() -> None:
     parser.add_argument("--run-name", dest="run_name", type=str, default=None)
     parser.add_argument("--lambda-q", dest="lambda_q", type=float, default=None)
     parser.add_argument("--lambda-state-anchor", dest="lambda_state_anchor", type=float, default=None)
+    parser.add_argument("--lambda-action-anchor", dest="lambda_action_anchor", type=float, default=None)
     parser.add_argument("--lambda-latent-anchor", dest="lambda_latent_anchor", type=float, default=None)
     parser.add_argument("--q-clip-min", dest="q_clip_min", type=float, default=None)
     parser.add_argument("--q-clip-max", dest="q_clip_max", type=float, default=None)
@@ -247,6 +257,7 @@ def main() -> None:
     parser.add_argument("--q-threshold", dest="q_threshold", type=float, default=None)
     parser.add_argument("--q-delta", dest="q_delta", type=float, default=None)
     parser.add_argument("--max-state-shift", dest="max_state_shift", type=float, default=None)
+    parser.add_argument("--max-action-deviation", dest="max_action_deviation", type=float, default=None)
     parser.add_argument("--commute-horizon", dest="commute_horizon", type=int, default=None)
     parser.add_argument("--value-temperature", dest="value_temperature", type=float, default=None)
     parser.set_defaults(use_wandb=None)
@@ -291,6 +302,7 @@ def main() -> None:
         num_workers=merged["num_workers"],
         lambda_q=merged["lambda_q"],
         lambda_state_anchor=merged["lambda_state_anchor"],
+        lambda_action_anchor=merged["lambda_action_anchor"],
         lambda_latent_anchor=merged["lambda_latent_anchor"],
         q_clip_min=merged["q_clip_min"],
         q_clip_max=merged["q_clip_max"],
@@ -301,6 +313,7 @@ def main() -> None:
         q_threshold=merged.get("q_threshold"),
         q_delta=merged.get("q_delta"),
         max_state_shift=merged.get("max_state_shift"),
+        max_action_deviation=merged.get("max_action_deviation"),
         commute_horizon=merged.get("commute_horizon", 1),
         value_temperature=merged.get("value_temperature", 1.0),
         run_name=merged.get("run_name"),

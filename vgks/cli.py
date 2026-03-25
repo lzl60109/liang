@@ -12,6 +12,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
     )
     parser.add_argument(
+        "--lambda-action-anchor",
+        dest="lambda_action_anchor",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
         "--lambda-latent-anchor",
         dest="lambda_latent_anchor",
         type=float,
@@ -22,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--q-threshold", dest="q_threshold", type=float, default=None)
     parser.add_argument("--q-delta", dest="q_delta", type=float, default=0.0)
     parser.add_argument("--max-state-shift", dest="max_state_shift", type=float, default=None)
+    parser.add_argument("--max-action-deviation", dest="max_action_deviation", type=float, default=None)
     parser.add_argument("--commute-horizon", dest="commute_horizon", type=int, default=1)
     parser.add_argument("--value-temperature", dest="value_temperature", type=float, default=1.0)
     parser.add_argument("--sigma-warmup-steps", dest="sigma_warmup_steps", type=int, default=0)

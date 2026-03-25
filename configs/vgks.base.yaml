@@ -31,12 +31,14 @@ eval_interval: 1
 save_best: true
 lambda_q: 0.02
 lambda_state_anchor: 1.0
+lambda_action_anchor: 0.5
 lambda_latent_anchor: 0.1
 q_clip_min: -20.0
 q_clip_max: 20.0
 q_threshold:
 q_delta:
 max_state_shift:
+max_action_deviation:
 commute_horizon: 1
 value_temperature: 1.0
 sigma_warmup_steps: 1000

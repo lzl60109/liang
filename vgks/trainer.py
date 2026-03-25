@@ -15,11 +15,13 @@ class SigmaLossMetrics:
     commutation_loss: float
     value_loss: float
     state_anchor_loss: float
+    action_anchor_loss: float
     latent_anchor_loss: float
     mean_conservative_q: float
     mean_conservative_q_unclipped: float
     mean_advantage: float
     mean_state_shift: float
+    mean_action_deviation: float
 
     def to_dict(self) -> Dict[str, float]:
         return {
@@ -27,11 +29,13 @@ class SigmaLossMetrics:
             "commutation_loss": self.commutation_loss,
             "value_loss": self.value_loss,
             "state_anchor_loss": self.state_anchor_loss,
+            "action_anchor_loss": self.action_anchor_loss,
             "latent_anchor_loss": self.latent_anchor_loss,
             "mean_conservative_q": self.mean_conservative_q,
             "mean_conservative_q_unclipped": self.mean_conservative_q_unclipped,
             "mean_advantage": self.mean_advantage,
             "mean_state_shift": self.mean_state_shift,
+            "mean_action_deviation": self.mean_action_deviation,
         }
 
 
@@ -46,12 +50,14 @@ class ValueGuidedKoopmanTrainer:
         sigma_tau: float = 1.0,
         lambda_q: float = 0.1,
         lambda_state_anchor: float = 1.0,
+        lambda_action_anchor: float = 1.0,
         lambda_latent_anchor: float = 0.1,
         q_clip_min: float = -20.0,
         q_clip_max: float = 20.0,
         sigma_warmup_steps: int = 0,
         q_delta: Optional[float] = None,
         max_state_shift: Optional[float] = None,
+        max_action_deviation: Optional[float] = None,
         commute_horizon: int = 1,
         value_temperature: float = 1.0,
         sigma_lr: float = 1e-3,
@@ -69,12 +75,14 @@ class ValueGuidedKoopmanTrainer:
         self.sigma_tau = sigma_tau
         self.lambda_q = lambda_q
         self.lambda_state_anchor = lambda_state_anchor
+        self.lambda_action_anchor = lambda_action_anchor
         self.lambda_latent_anchor = lambda_latent_anchor
         self.q_clip_min = q_clip_min
         self.q_clip_max = q_clip_max
         self.sigma_warmup_steps = sigma_warmup_steps
         self.q_delta = q_delta
         self.max_state_shift = max_state_shift
+        self.max_action_deviation = max_action_deviation
         self.commute_horizon = max(1, int(commute_horizon))
         self.value_temperature = max(float(value_temperature), 1e-6)
         self._steps = 0
@@ -146,13 +154,16 @@ class ValueGuidedKoopmanTrainer:
             F.mse_loss(augmented_states, observations)
             + F.mse_loss(augmented_next_states, next_observations)
         )
+        action_anchor_loss = F.mse_loss(augmented_actions, raw_actions)
         latent_anchor_loss = F.mse_loss(sigma_z_t, z_t) + F.mse_loss(sigma_z_t1, z_t1)
         state_shift = torch.norm(augmented_states - observations, dim=1)
+        action_deviation = torch.norm(augmented_actions - raw_actions, dim=1)
 
         total_loss = (
             commutation_loss
             + self._effective_lambda_q() * value_loss
             + self.lambda_state_anchor * state_anchor_loss
+            + self.lambda_action_anchor * action_anchor_loss
             + self.lambda_latent_anchor * latent_anchor_loss
         )
 
@@ -161,11 +172,13 @@ class ValueGuidedKoopmanTrainer:
             "commutation_loss": commutation_loss,
             "value_loss": value_loss,
             "state_anchor_loss": state_anchor_loss,
+            "action_anchor_loss": action_anchor_loss,
             "latent_anchor_loss": latent_anchor_loss,
             "mean_conservative_q": conservative_q.mean(),
             "mean_conservative_q_unclipped": aug_q_unclipped.mean(),
             "mean_advantage": unclipped_advantage.mean(),
             "mean_state_shift": state_shift.mean(),
+            "mean_action_deviation": action_deviation.mean(),
         }
 
     def compute_sigma_loss(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
@@ -176,11 +189,13 @@ class ValueGuidedKoopmanTrainer:
             commutation_loss=float(tensor_metrics["commutation_loss"].detach().cpu().item()),
             value_loss=float(tensor_metrics["value_loss"].detach().cpu().item()),
             state_anchor_loss=float(tensor_metrics["state_anchor_loss"].detach().cpu().item()),
+            action_anchor_loss=float(tensor_metrics["action_anchor_loss"].detach().cpu().item()),
             latent_anchor_loss=float(tensor_metrics["latent_anchor_loss"].detach().cpu().item()),
             mean_conservative_q=float(tensor_metrics["mean_conservative_q"].detach().cpu().item()),
             mean_conservative_q_unclipped=float(tensor_metrics["mean_conservative_q_unclipped"].detach().cpu().item()),
             mean_advantage=float(tensor_metrics["mean_advantage"].detach().cpu().item()),
             mean_state_shift=float(tensor_metrics["mean_state_shift"].detach().cpu().item()),
+            mean_action_deviation=float(tensor_metrics["mean_action_deviation"].detach().cpu().item()),
         ).to_dict()
 
     def train_sigma_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
@@ -201,11 +216,13 @@ class ValueGuidedKoopmanTrainer:
             "commutation_loss": 0.0,
             "value_loss": 0.0,
             "state_anchor_loss": 0.0,
+            "action_anchor_loss": 0.0,
             "latent_anchor_loss": 0.0,
             "mean_conservative_q": 0.0,
             "mean_conservative_q_unclipped": 0.0,
             "mean_advantage": 0.0,
             "mean_state_shift": 0.0,
+            "mean_action_deviation": 0.0,
         }
         step_count = 0
         for batch in batches:
@@ -227,6 +244,7 @@ class ValueGuidedKoopmanTrainer:
         q_threshold: Optional[float] = None,
         q_delta: Optional[float] = None,
         max_state_shift: Optional[float] = None,
+        max_action_deviation: Optional[float] = None,
     ) -> Dict[str, torch.Tensor]:
         with torch.no_grad():
             observations = self._to_tensor(batch["observations"])
@@ -256,16 +274,22 @@ class ValueGuidedKoopmanTrainer:
             raw_q_values = self.critic.conservative_value(observations, raw_actions)
             advantages = unclipped_q_values - raw_q_values
             state_shift = torch.norm(augmented_states - observations, dim=1)
+            action_deviation = torch.norm(augmented_actions - raw_actions, dim=1)
 
             mask = torch.ones_like(q_values, dtype=torch.bool)
             effective_q_delta = self.q_delta if q_delta is None else q_delta
             effective_max_state_shift = self.max_state_shift if max_state_shift is None else max_state_shift
+            effective_max_action_deviation = (
+                self.max_action_deviation if max_action_deviation is None else max_action_deviation
+            )
             if q_threshold is not None:
                 mask = mask & (q_values >= q_threshold)
             if effective_q_delta is not None:
                 mask = mask & (advantages >= effective_q_delta)
             if effective_max_state_shift is not None:
                 mask = mask & (state_shift <= effective_max_state_shift)
+            if effective_max_action_deviation is not None:
+                mask = mask & (action_deviation <= effective_max_action_deviation)
 
             return {
                 "observations": augmented_states[mask].detach().cpu(),
@@ -274,5 +298,6 @@ class ValueGuidedKoopmanTrainer:
                 "q_values": q_values[mask].detach().cpu(),
                 "advantages": advantages[mask].detach().cpu(),
                 "state_shift": state_shift[mask].detach().cpu(),
+                "action_deviation": action_deviation[mask].detach().cpu(),
                 "num_kept": int(mask.sum().detach().cpu().item()),
             }
