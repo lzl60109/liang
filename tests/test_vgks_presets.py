@@ -93,6 +93,35 @@ class VGKSPresetTests(unittest.TestCase):
         self.assertEqual(raw_config["commute_horizon"], 2)
         self.assertEqual(raw_config["sigma_warmup_steps"], 2000)
 
+    def test_halfcheetah_medium_preset_is_flattened(self):
+        path = REPO_ROOT / "configs" / "vgks.halfcheetah-medium.yaml"
+        raw_config = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+        self.assertNotIn("base_config", raw_config)
+        self.assertEqual(raw_config["env_name"], "halfcheetah-medium-v2")
+        self.assertEqual(raw_config["q_delta"], 8.0)
+        self.assertEqual(raw_config["max_state_shift"], 4.0)
+        self.assertEqual(raw_config["max_action_deviation"], 0.9)
+        self.assertEqual(raw_config["q_clip_max"], 50.0)
+        self.assertEqual(raw_config["value_temperature"], 5.0)
+        self.assertEqual(raw_config["commute_horizon"], 2)
+        self.assertEqual(raw_config["sigma_warmup_steps"], 2000)
+
+    def test_halfcheetah_medium_replay_preset_is_flattened(self):
+        path = REPO_ROOT / "configs" / "vgks.halfcheetah-medium-replay.yaml"
+        raw_config = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+        self.assertNotIn("base_config", raw_config)
+        self.assertEqual(raw_config["env_name"], "halfcheetah-medium-replay-v2")
+        self.assertEqual(raw_config["lambda_q"], 0.005)
+        self.assertEqual(raw_config["q_delta"], 5.0)
+        self.assertEqual(raw_config["max_state_shift"], 3.5)
+        self.assertEqual(raw_config["max_action_deviation"], 0.8)
+        self.assertEqual(raw_config["q_clip_max"], 50.0)
+        self.assertEqual(raw_config["value_temperature"], 5.0)
+        self.assertEqual(raw_config["commute_horizon"], 2)
+        self.assertEqual(raw_config["sigma_warmup_steps"], 2000)
+
 
 if __name__ == "__main__":
     unittest.main()

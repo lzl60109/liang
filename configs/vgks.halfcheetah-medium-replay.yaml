@@ -1,6 +1,56 @@
-base_config: vgks.mujoco.base.yaml
 env_name: halfcheetah-medium-replay-v2
+task:
+dataset_name:
 dataset_path: data/d4rl/halfcheetah-medium-replay-v2
 save_dir: runs/vgks/halfcheetah-medium-replay-v2/seed_0
-wandb_name: halfcheetah-medium-replay-seed0
 run_name: halfcheetah-medium-replay-seed0
+wandb_name: halfcheetah-medium-replay-seed0
+
+state_dim:
+action_dim:
+latent_dim: 32
+hidden_dim: 256
+batch_size: 256
+epochs: 20
+sigma_tau: 0.01
+
+koopman_pretrain_epochs: 20
+critic_pretrain_epochs: 20
+koopman_lr: 0.001
+inverse_lr: 0.001
+critic_lr: 0.001
+critic_discount: 0.99
+critic_policy_lr: 0.0003
+critic_tau: 0.005
+critic_samples: 10
+cql_alpha: 5.0
+cql_temp: 1.0
+sigma_lr: 0.001
+
+device: cuda:0
+num_workers: 4
+seed: 0
+use_wandb: true
+wandb_project: vgks-paper
+wandb_group: vgks
+eval_episodes: 10
+eval_interval: 1
+save_best: true
+
+lambda_q: 0.005
+lambda_state_anchor: 1.0
+lambda_action_anchor: 0.5
+lambda_latent_anchor: 0.1
+
+q_clip_min: -20.0
+q_clip_max: 50.0
+q_threshold:
+q_delta: 5.0
+max_state_shift: 3.5
+max_action_deviation: 0.8
+commute_horizon: 2
+value_temperature: 5.0
+sigma_warmup_steps: 2000
+
+kats_checkpoint:
+critic_checkpoint:
